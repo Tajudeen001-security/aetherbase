@@ -5,6 +5,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { v4 as uuidv4 } from "uuid";
 import { query } from "./db/client";
+import { uploadFile, getFileUrl, listFiles, deleteFile } from "./storage";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -14,7 +15,6 @@ app.use("*", cors());
 
 const JWT_SECRET = process.env.JWT_SECRET || "kotahbase-dev-secret-change-me";
 
-// ====================== HELPERS ======================
 function generateOTP(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
@@ -39,11 +39,10 @@ async function getUserFromToken(authHeader: string | undefined) {
 app.get("/", (c) => {
   return c.json({
     name: "KotahBase API",
-    version: "0.1.3",
+    version: "0.1.4",
     status: "ok",
     message: "KotahBase — Backend for apps, websites & games",
-    auth: "Email + Password + 6-digit code",
-    database: "Postgres connected"
+    features: ["Auth", "Database", "Storage"]
   });
 });
 
@@ -57,12 +56,9 @@ app.get("/health", async (c) => {
 });
 
 // ====================== AUTH ======================
-
-// Sign Up: Email + Password → sends 6-digit code
 app.post("/auth/v1/signup", async (c) => {
   try {
     const { email, password } = await c.req.json();
-
     if (!email || !password) return c.json({ error: "Email and password are required" }, 400);
     if (password.length < 8) return c.json({ error: "Password must be at least 8 characters" }, 400);
 
@@ -97,17 +93,12 @@ app.post("/auth/v1/signup", async (c) => {
   }
 });
 
-// Verify 6-digit code
 app.post("/auth/v1/verify", async (c) => {
   try {
     const { email, code } = await c.req.json();
     if (!email || !code) return c.json({ error: "Email and 6-digit code are required" }, 400);
 
-    const otpRes = await query(
-      "SELECT code, expires_at FROM otp_codes WHERE email = $1",
-      [email.toLowerCase()]
-    );
-
+    const otpRes = await query("SELECT code, expires_at FROM otp_codes WHERE email = $1", [email.toLowerCase()]);
     if (otpRes.rows.length === 0) return c.json({ error: "No code found" }, 400);
 
     const record = otpRes.rows[0];
@@ -115,7 +106,6 @@ app.post("/auth/v1/verify", async (c) => {
       await query("DELETE FROM otp_codes WHERE email = $1", [email.toLowerCase()]);
       return c.json({ error: "Code expired" }, 400);
     }
-
     if (record.code !== code) return c.json({ error: "Invalid 6-digit code" }, 401);
 
     await query("DELETE FROM otp_codes WHERE email = $1", [email.toLowerCase()]);
@@ -123,22 +113,15 @@ app.post("/auth/v1/verify", async (c) => {
 
     const userRes = await query("SELECT id, email, created_at FROM users WHERE email = $1", [email.toLowerCase()]);
     const user = userRes.rows[0];
-
     const token = createToken({ sub: user.id, email: user.email });
 
-    return c.json({
-      access_token: token,
-      token_type: "bearer",
-      expires_in: 604800,
-      user
-    });
+    return c.json({ access_token: token, token_type: "bearer", expires_in: 604800, user });
   } catch (err) {
     console.error(err);
     return c.json({ error: "Verification failed" }, 500);
   }
 });
 
-// Login: Email + Password
 app.post("/auth/v1/login", async (c) => {
   try {
     const { email, password } = await c.req.json();
@@ -150,13 +133,9 @@ app.post("/auth/v1/login", async (c) => {
     const user = res.rows[0];
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return c.json({ error: "Invalid email or password" }, 401);
-
-    if (!user.email_confirmed) {
-      return c.json({ error: "Please verify your email with the 6-digit code first" }, 403);
-    }
+    if (!user.email_confirmed) return c.json({ error: "Please verify your email with the 6-digit code first" }, 403);
 
     const token = createToken({ sub: user.id, email: user.email });
-
     return c.json({
       access_token: token,
       token_type: "bearer",
@@ -169,7 +148,6 @@ app.post("/auth/v1/login", async (c) => {
   }
 });
 
-// Resend code
 app.post("/auth/v1/resend-code", async (c) => {
   try {
     const { email } = await c.req.json();
@@ -187,17 +165,12 @@ app.post("/auth/v1/resend-code", async (c) => {
     );
 
     console.log(`\n🔐 RESEND OTP for ${email}: ${code}\n`);
-
-    return c.json({
-      message: "New 6-digit code sent",
-      dev_code: process.env.NODE_ENV === "production" ? undefined : code
-    });
+    return c.json({ message: "New 6-digit code sent", dev_code: process.env.NODE_ENV === "production" ? undefined : code });
   } catch {
     return c.json({ error: "Failed to resend code" }, 500);
   }
 });
 
-// Get current user
 app.get("/auth/v1/user", async (c) => {
   const user = await getUserFromToken(c.req.header("Authorization"));
   if (!user) return c.json({ error: "Not authenticated" }, 401);
@@ -205,7 +178,6 @@ app.get("/auth/v1/user", async (c) => {
 });
 
 // ====================== PROJECTS ======================
-
 app.post("/projects", async (c) => {
   try {
     const user = await getUserFromToken(c.req.header("Authorization"));
@@ -227,13 +199,7 @@ app.post("/projects", async (c) => {
       [id, name, hashed, user.id, apiKey]
     );
 
-    return c.json({
-      id,
-      name,
-      api_key: apiKey,
-      created_at: new Date().toISOString(),
-      message: "Project created successfully"
-    });
+    return c.json({ id, name, api_key: apiKey, created_at: new Date().toISOString(), message: "Project created successfully" });
   } catch (err) {
     console.error(err);
     return c.json({ error: "Failed to create project" }, 500);
@@ -248,30 +214,23 @@ app.get("/projects", async (c) => {
     "SELECT id, name, api_key, created_at FROM projects WHERE owner_id = $1 ORDER BY created_at DESC",
     [user.id]
   );
-
   return c.json(res.rows);
 });
 
-// ====================== DATABASE REST API ======================
-
-// Simple select
+// ====================== DATABASE REST ======================
 app.get("/rest/v1/:table", async (c) => {
   try {
     const table = c.req.param("table");
-    // Very basic protection - only allow known tables for now
-    const allowed = ["game_scores", "users", "projects"];
-    if (!allowed.includes(table)) {
-      return c.json({ error: "Table not allowed" }, 403);
-    }
+    const allowed = ["game_scores"];
+    if (!allowed.includes(table)) return c.json({ error: "Table not allowed" }, 403);
 
-    const res = await query(`SELECT * FROM ${table} LIMIT 100`);
+    const res = await query(`SELECT * FROM ${table} ORDER BY created_at DESC LIMIT 100`);
     return c.json(res.rows);
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
   }
 });
 
-// Insert
 app.post("/rest/v1/:table", async (c) => {
   try {
     const table = c.req.param("table");
@@ -281,12 +240,66 @@ app.post("/rest/v1/:table", async (c) => {
       const id = uuidv4();
       await query(
         "INSERT INTO game_scores (id, player_name, score) VALUES ($1, $2, $3)",
-        [id, body.player_name, body.score || 0]
+        [id, body.player_name || "Anonymous", body.score || 0]
       );
-      return c.json({ id, ...body }, 201);
+      return c.json({ id, player_name: body.player_name, score: body.score }, 201);
     }
-
     return c.json({ error: "Insert not supported for this table yet" }, 400);
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// ====================== STORAGE ======================
+
+// Upload file (simple base64 or multipart later)
+app.post("/storage/v1/object/:bucket/:key{.+}", async (c) => {
+  try {
+    const user = await getUserFromToken(c.req.header("Authorization"));
+    if (!user) return c.json({ error: "Not authenticated" }, 401);
+
+    const bucket = c.req.param("bucket");
+    const key = c.req.param("key");
+    const contentType = c.req.header("content-type") || "application/octet-stream";
+
+    // For now accept raw body
+    const arrayBuffer = await c.req.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    const result = await uploadFile(`${bucket}/${key}`, buffer, contentType);
+
+    return c.json({
+      Key: result.key,
+      url: result.url,
+      message: "File uploaded successfully"
+    });
+  } catch (err: any) {
+    console.error(err);
+    return c.json({ error: err.message || "Upload failed" }, 500);
+  }
+});
+
+// Get public/signed url
+app.get("/storage/v1/object/:bucket/:key{.+}", async (c) => {
+  try {
+    const bucket = c.req.param("bucket");
+    const key = c.req.param("key");
+    const url = await getFileUrl(`${bucket}/${key}`);
+    return c.json({ url });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// List files
+app.get("/storage/v1/list/:bucket", async (c) => {
+  try {
+    const user = await getUserFromToken(c.req.header("Authorization"));
+    if (!user) return c.json({ error: "Not authenticated" }, 401);
+
+    const bucket = c.req.param("bucket");
+    const files = await listFiles(bucket + "/");
+    return c.json(files.map(f => ({ key: f.Key, size: f.Size, lastModified: f.LastModified })));
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
   }
@@ -297,10 +310,7 @@ const port = Number(process.env.PORT) || 4000;
 
 console.log(`\n🚀 KotahBase API running on http://localhost:${port}`);
 console.log(`   Auth     → Email + Password + 6-digit code`);
-console.log(`   Database → Postgres connected`);
-console.log(`   Storage  → Coming next\n`);
+console.log(`   Database → Postgres`);
+console.log(`   Storage  → MinIO / S3 ready\n`);
 
-serve({
-  fetch: app.fetch,
-  port
-});
+serve({ fetch: app.fetch, port });
