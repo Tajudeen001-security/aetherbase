@@ -1,0 +1,19 @@
+{
+  "name": "korabase",
+  "version": "0.1.0",
+  "private": true,
+  "description": "KoraBase - Backend platform for apps, websites and games",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "dev": "echo \"Start individual apps with their own scripts\"",
+    "build": "echo \"Build all packages\"",
+    "lint": "echo \"Lint\""
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
