@@ -5,7 +5,7 @@
 
 export interface KotahClientOptions {
   url: string;
-  apiKey: string;
+  apiKey?: string;
 }
 
 export class KotahClient {
@@ -15,19 +15,17 @@ export class KotahClient {
 
   constructor(options: KotahClientOptions) {
     this.url = options.url.replace(/\/$/, "");
-    this.apiKey = options.apiKey;
+    this.apiKey = options.apiKey || "";
   }
 
   private async request(path: string, options: RequestInit = {}) {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      "apikey": this.apiKey,
       ...(options.headers as Record<string, string> || {})
     };
 
-    if (this.accessToken) {
-      headers["Authorization"] = `Bearer ${this.accessToken}`;
-    }
+    if (this.apiKey) headers["apikey"] = this.apiKey;
+    if (this.accessToken) headers["Authorization"] = `Bearer ${this.accessToken}`;
 
     const res = await fetch(`${this.url}${path}`, {
       ...options,
@@ -41,31 +39,31 @@ export class KotahClient {
     return { data, error: null };
   }
 
-  // ========== AUTH (Email only) ==========
+  // ========== AUTH (Email + 6-digit code) ==========
   auth = {
-    signUp: async (email: string, password: string) => {
-      return this.request("/auth/v1/signup", {
+    /**
+     * Step 1: Request 6-digit code
+     */
+    sendCode: async (email: string) => {
+      return this.request("/auth/v1/otp", {
         method: "POST",
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ email })
       });
     },
 
-    signIn: async (email: string, password: string) => {
-      const result = await this.request("/auth/v1/token", {
+    /**
+     * Step 2: Verify 6-digit code and get session
+     */
+    verifyCode: async (email: string, code: string) => {
+      const result = await this.request("/auth/v1/verify", {
         method: "POST",
-        body: JSON.stringify({ email, password, grant_type: "password" })
+        body: JSON.stringify({ email, code })
       });
+
       if (result.data?.access_token) {
         this.accessToken = result.data.access_token;
       }
       return result;
-    },
-
-    signInWithMagicLink: async (email: string) => {
-      return this.request("/auth/v1/magiclink", {
-        method: "POST",
-        body: JSON.stringify({ email })
-      });
     },
 
     signOut: async () => {
@@ -79,6 +77,20 @@ export class KotahClient {
 
     getSession: () => {
       return this.accessToken ? { access_token: this.accessToken } : null;
+    }
+  };
+
+  // ========== PROJECTS ==========
+  projects = {
+    create: async (name: string, password: string) => {
+      return this.request("/projects", {
+        method: "POST",
+        body: JSON.stringify({ name, password })
+      });
+    },
+
+    list: async () => {
+      return this.request("/projects");
     }
   };
 
@@ -100,27 +112,6 @@ export class KotahClient {
           });
           resolve(result);
         }
-      }),
-      update: (data: any) => ({
-        eq: (column: string, value: any) => ({
-          async then(resolve: any) {
-            const result = await self.request(`/rest/v1/${table}?${column}=eq.${value}`, {
-              method: "PATCH",
-              body: JSON.stringify(data)
-            });
-            resolve(result);
-          }
-        })
-      }),
-      delete: () => ({
-        eq: (column: string, value: any) => ({
-          async then(resolve: any) {
-            const result = await self.request(`/rest/v1/${table}?${column}=eq.${value}`, {
-              method: "DELETE"
-            });
-            resolve(result);
-          }
-        })
       })
     };
   }
@@ -128,10 +119,6 @@ export class KotahClient {
   // ========== STORAGE ==========
   storage = {
     from: (bucket: string) => ({
-      upload: async (path: string, file: File | Blob) => {
-        // Will be implemented with real multipart later
-        return { data: null, error: "Upload coming soon" };
-      },
       getPublicUrl: (path: string) => {
         return `${this.url}/storage/v1/object/public/${bucket}/${path}`;
       }
@@ -142,12 +129,9 @@ export class KotahClient {
   channel(name: string) {
     return {
       on: (event: string, callback: (payload: any) => void) => {
-        console.log(`[KotahBase] Subscribed to ${name}:${event}`);
         return this;
       },
-      subscribe: () => {
-        console.log(`[KotahBase] Channel ${name} subscribed`);
-      }
+      subscribe: () => {}
     };
   }
 }
