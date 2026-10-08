@@ -1,14 +1,13 @@
 {
-  "name": "@korabase/sdk",
+  "name": "@kotahbase/sdk",
   "version": "0.1.0",
-  "description": "Official JavaScript/TypeScript SDK for KoraBase",
+  "description": "Official JavaScript/TypeScript SDK for KotahBase",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch"
   },
-  "dependencies": {},
   "devDependencies": {
     "typescript": "^5"
   }

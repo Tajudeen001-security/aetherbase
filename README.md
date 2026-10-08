@@ -1,53 +1,54 @@
-# KoraBase
+# KotahBase
 
-**The open backend platform for apps, websites & games.**
+**The simple, cheap backend platform for apps, websites & games.**
 
-KoraBase is a simple, cheap, and powerful alternative to Firebase and Supabase.
+KotahBase is a practical alternative to Firebase and Supabase.
 
 ### Core Features (v1)
 - **Authentication** — Email + Password + Magic Link only
-- **Database** — Postgres with Realtime subscriptions
-- **Storage** — File & media hosting (game assets, images, videos)
+- **Database** — Postgres with Realtime
+- **Storage** — File & media hosting (perfect for game assets)
 - **Realtime** — Live updates, presence, multiplayer rooms
 - **Hosting** — Static websites + serverless functions
 
-### Why KoraBase?
+### Why KotahBase?
 - Cheap pricing
 - Built for games + normal apps + websites
 - Low-stress to run and maintain
 - Clean developer experience
 
-### Status
-Currently in active development.
-
-Repo: https://github.com/Tajudeen001-security/aetherbase  
-(We will rename the repository to `korabase` soon)
+### Current Status
+Active development. Core foundation is live.
 
 ---
 
 ## Project Structure
 
 ```
-korabase/
+kotahbase/
 ├── apps/
-│   ├── dashboard/          # Admin dashboard (Next.js)
-│   └── docs/               # Documentation site
+│   └── dashboard/          # Admin dashboard (Next.js)
 ├── packages/
-│   ├── sdk/                # JavaScript/TypeScript SDK
-│   ├── auth/               # Auth service
-│   ├── database/           # Database + Realtime
-│   ├── storage/            # File storage
-│   └── hosting/            # Static hosting + functions
+│   └── sdk/                # JavaScript/TypeScript SDK
 ├── services/
-│   └── api/                # Main API gateway
-└── infra/                  # Docker, deployment configs
+│   └── api/                # Main API (Hono)
+└── infra/                  # Docker, local development
 ```
 
-## Getting Started (coming soon)
+## Local Development
 
 ```bash
-npm create korabase@latest
+# Start database + storage
+cd infra
+docker compose up -d
+
+# Start API
+cd services/api
+npm install
+npm run dev
 ```
+
+API will run on http://localhost:4000
 
 ## License
 MIT

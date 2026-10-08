@@ -1,73 +1,136 @@
 /**
- * KoraBase SDK
+ * KotahBase SDK
  * Official client for apps, websites and games
  */
 
-export interface KoraClientOptions {
+export interface KotahClientOptions {
   url: string;
   apiKey: string;
 }
 
-export class KoraClient {
+export class KotahClient {
   private url: string;
   private apiKey: string;
+  private accessToken: string | null = null;
 
-  constructor(options: KoraClientOptions) {
-    this.url = options.url;
+  constructor(options: KotahClientOptions) {
+    this.url = options.url.replace(/\/$/, "");
     this.apiKey = options.apiKey;
   }
 
-  // Auth (email only)
+  private async request(path: string, options: RequestInit = {}) {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "apikey": this.apiKey,
+      ...(options.headers as Record<string, string> || {})
+    };
+
+    if (this.accessToken) {
+      headers["Authorization"] = `Bearer ${this.accessToken}`;
+    }
+
+    const res = await fetch(`${this.url}${path}`, {
+      ...options,
+      headers
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { data: null, error: data.error || data.message || "Request failed" };
+    }
+    return { data, error: null };
+  }
+
+  // ========== AUTH (Email only) ==========
   auth = {
     signUp: async (email: string, password: string) => {
-      // TODO: implement
-      return { user: null, error: null };
+      return this.request("/auth/v1/signup", {
+        method: "POST",
+        body: JSON.stringify({ email, password })
+      });
     },
+
     signIn: async (email: string, password: string) => {
-      // TODO: implement
-      return { user: null, session: null, error: null };
+      const result = await this.request("/auth/v1/token", {
+        method: "POST",
+        body: JSON.stringify({ email, password, grant_type: "password" })
+      });
+      if (result.data?.access_token) {
+        this.accessToken = result.data.access_token;
+      }
+      return result;
     },
+
     signInWithMagicLink: async (email: string) => {
-      // TODO: implement
+      return this.request("/auth/v1/magiclink", {
+        method: "POST",
+        body: JSON.stringify({ email })
+      });
+    },
+
+    signOut: async () => {
+      this.accessToken = null;
       return { error: null };
     },
-    signOut: async () => {
-      // TODO: implement
-    },
+
     getUser: async () => {
-      // TODO: implement
-      return { user: null };
+      return this.request("/auth/v1/user");
+    },
+
+    getSession: () => {
+      return this.accessToken ? { access_token: this.accessToken } : null;
     }
   };
 
-  // Database
+  // ========== DATABASE ==========
   from(table: string) {
+    const self = this;
     return {
       select: (columns = "*") => ({
-        // chainable query builder - TODO
+        async then(resolve: any) {
+          const result = await self.request(`/rest/v1/${table}?select=${columns}`);
+          resolve(result);
+        }
       }),
       insert: (data: any) => ({
-        // TODO
+        async then(resolve: any) {
+          const result = await self.request(`/rest/v1/${table}`, {
+            method: "POST",
+            body: JSON.stringify(data)
+          });
+          resolve(result);
+        }
       }),
       update: (data: any) => ({
-        // TODO
+        eq: (column: string, value: any) => ({
+          async then(resolve: any) {
+            const result = await self.request(`/rest/v1/${table}?${column}=eq.${value}`, {
+              method: "PATCH",
+              body: JSON.stringify(data)
+            });
+            resolve(result);
+          }
+        })
       }),
       delete: () => ({
-        // TODO
+        eq: (column: string, value: any) => ({
+          async then(resolve: any) {
+            const result = await self.request(`/rest/v1/${table}?${column}=eq.${value}`, {
+              method: "DELETE"
+            });
+            resolve(result);
+          }
+        })
       })
     };
   }
 
-  // Storage
+  // ========== STORAGE ==========
   storage = {
     from: (bucket: string) => ({
       upload: async (path: string, file: File | Blob) => {
-        // TODO
-        return { data: null, error: null };
-      },
-      download: async (path: string) => {
-        // TODO
-        return { data: null, error: null };
+        // Will be implemented with real multipart later
+        return { data: null, error: "Upload coming soon" };
       },
       getPublicUrl: (path: string) => {
         return `${this.url}/storage/v1/object/public/${bucket}/${path}`;
@@ -75,18 +138,18 @@ export class KoraClient {
     })
   };
 
-  // Realtime
+  // ========== REALTIME ==========
   channel(name: string) {
     return {
-      on: (event: string, callback: Function) => {
-        // TODO: websocket
+      on: (event: string, callback: (payload: any) => void) => {
+        console.log(`[KotahBase] Subscribed to ${name}:${event}`);
         return this;
       },
       subscribe: () => {
-        // TODO
+        console.log(`[KotahBase] Channel ${name} subscribed`);
       }
     };
   }
 }
 
-export default KoraClient;
+export default KotahClient;

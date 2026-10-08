@@ -1,17 +1,16 @@
 {
-  "name": "korabase",
+  "name": "kotahbase",
   "version": "0.1.0",
   "private": true,
-  "description": "KoraBase - Backend platform for apps, websites and games",
+  "description": "KotahBase - Backend platform for apps, websites and games",
   "workspaces": [
     "apps/*",
     "packages/*",
     "services/*"
   ],
   "scripts": {
-    "dev": "echo \"Start individual apps with their own scripts\"",
-    "build": "echo \"Build all packages\"",
-    "lint": "echo \"Lint\""
+    "dev:api": "npm run dev --workspace=@kotahbase/api",
+    "dev:dashboard": "npm run dev --workspace=@kotahbase/dashboard"
   },
   "engines": {
     "node": ">=20"
