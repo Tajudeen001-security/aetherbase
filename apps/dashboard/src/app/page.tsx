@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   LayoutDashboard, Shield, Database, HardDrive, Radio,
-  Globe, Settings, LogOut, Menu, Users, Activity, Server
+  Globe, Settings, Menu, Users, Activity, Server, Upload,
+  CheckCircle, XCircle, Loader2
 } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
@@ -24,8 +25,35 @@ export default function DashboardPage() {
   const [health, setHealth] = useState<any>(null);
   const [realtimeStats, setRealtimeStats] = useState<any>(null);
   const [scores, setScores] = useState<any[]>([]);
+  const [token, setToken] = useState<string | null>(null);
+  const [user, setUser] = useState<any>(null);
+
+  // Auth form state
+  const [authMode, setAuthMode] = useState<"login" | "signup" | "verify">("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [authMsg, setAuthMsg] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [devCode, setDevCode] = useState("");
+
+  // Storage state
+  const [uploadStatus, setUploadStatus] = useState("");
+  const [uploadedFiles, setUploadedFiles] = useState<any[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  // Hosting state
+  const [sites, setSites] = useState<any[]>([
+    { id: 1, name: "my-game-landing", url: "https://my-game.kotahbase.app", status: "Live", updated: "Just now" }
+  ]);
+  const [newSiteName, setNewSiteName] = useState("");
 
   useEffect(() => {
+    const saved = localStorage.getItem("kotah_token");
+    if (saved) {
+      setToken(saved);
+      fetchUser(saved);
+    }
     fetchHealth();
     const interval = setInterval(fetchHealth, 5000);
     return () => clearInterval(interval);
@@ -42,6 +70,18 @@ export default function DashboardPage() {
     }
   }
 
+  async function fetchUser(t: string) {
+    try {
+      const res = await fetch(`${API_URL}/auth/v1/user`, {
+        headers: { Authorization: `Bearer ${t}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data);
+      }
+    } catch {}
+  }
+
   async function fetchScores() {
     try {
       const res = await fetch(`${API_URL}/rest/v1/game_scores`);
@@ -55,6 +95,127 @@ export default function DashboardPage() {
   useEffect(() => {
     if (active === "database") fetchScores();
   }, [active]);
+
+  // ========== AUTH ACTIONS ==========
+  async function handleSignup() {
+    setAuthLoading(true);
+    setAuthMsg("");
+    try {
+      const res = await fetch(`${API_URL}/auth/v1/signup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Signup failed");
+      setAuthMsg(data.message);
+      if (data.dev_code) setDevCode(data.dev_code);
+      setAuthMode("verify");
+    } catch (err: any) {
+      setAuthMsg(err.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function handleVerify() {
+    setAuthLoading(true);
+    setAuthMsg("");
+    try {
+      const res = await fetch(`${API_URL}/auth/v1/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, code })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Verification failed");
+      setToken(data.access_token);
+      localStorage.setItem("kotah_token", data.access_token);
+      setUser(data.user);
+      setAuthMsg("Verified & logged in!");
+      setAuthMode("login");
+    } catch (err: any) {
+      setAuthMsg(err.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function handleLogin() {
+    setAuthLoading(true);
+    setAuthMsg("");
+    try {
+      const res = await fetch(`${API_URL}/auth/v1/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Login failed");
+      setToken(data.access_token);
+      localStorage.setItem("kotah_token", data.access_token);
+      setUser(data.user);
+      setAuthMsg("Logged in successfully!");
+    } catch (err: any) {
+      setAuthMsg(err.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  function handleLogout() {
+    setToken(null);
+    setUser(null);
+    localStorage.removeItem("kotah_token");
+    setAuthMsg("Logged out");
+  }
+
+  // ========== STORAGE UPLOAD ==========
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!token) {
+      setUploadStatus("Please login first");
+      return;
+    }
+
+    setUploadStatus("Uploading...");
+    try {
+      const res = await fetch(`${API_URL}/storage/v1/object/uploads/${file.name}`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": file.type || "application/octet-stream"
+        },
+        body: file
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Upload failed");
+
+      setUploadedFiles(prev => [...prev, { name: file.name, url: data.url, size: file.size }]);
+      setUploadStatus("Uploaded successfully!");
+    } catch (err: any) {
+      setUploadStatus(err.message);
+    }
+  }
+
+  // ========== HOSTING ==========
+  function createSite() {
+    if (!newSiteName.trim()) return;
+    const site = {
+      id: Date.now(),
+      name: newSiteName,
+      url: `https://${newSiteName.toLowerCase().replace(/\s+/g, "-")}.kotahbase.app`,
+      status: "Building",
+      updated: "Just now"
+    };
+    setSites(prev => [site, ...prev]);
+    setNewSiteName("");
+    // Simulate build finish
+    setTimeout(() => {
+      setSites(prev => prev.map(s => s.id === site.id ? { ...s, status: "Live" } : s));
+    }, 2500);
+  }
 
   return (
     <div className="flex h-screen bg-gray-950 text-gray-100">
@@ -84,12 +245,19 @@ export default function DashboardPage() {
           })}
         </nav>
 
-        <div className="p-4 border-t border-gray-800 text-sm text-gray-500">
-          {health?.status === "healthy" ? (
-            <span className="text-green-400">● API Online</span>
+        <div className="p-4 border-t border-gray-800 text-sm">
+          {user ? (
+            <div className="text-gray-300 truncate">{user.email}</div>
           ) : (
-            <span className="text-red-400">● API Offline</span>
+            <div className="text-gray-500">Not logged in</div>
           )}
+          <div className="mt-1">
+            {health?.status === "healthy" ? (
+              <span className="text-green-400 text-xs">● API Online</span>
+            ) : (
+              <span className="text-red-400 text-xs">● API Offline</span>
+            )}
+          </div>
         </div>
       </aside>
 
@@ -100,6 +268,11 @@ export default function DashboardPage() {
             <Menu size={20} />
           </button>
           <span className="text-sm text-gray-400">KotahBase Dashboard</span>
+          {user && (
+            <button onClick={handleLogout} className="ml-auto text-sm text-gray-400 hover:text-white">
+              Logout
+            </button>
+          )}
         </header>
 
         <div className="p-8">
@@ -113,7 +286,6 @@ export default function DashboardPage() {
                 <Card title="Active Rooms" value={realtimeStats?.rooms?.length ?? "—"} icon={<Radio size={18} />} />
                 <Card title="Database" value={health?.database === "connected" ? "Connected" : "—"} icon={<Database size={18} />} />
               </div>
-
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
                 <h2 className="font-medium mb-4 flex items-center gap-2"><Activity size={16} /> System Status</h2>
                 <pre className="text-xs text-gray-400 overflow-auto">{JSON.stringify(health, null, 2)}</pre>
@@ -121,33 +293,97 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* ==================== AUTH ==================== */}
+          {/* ==================== AUTH (Interactive) ==================== */}
           {active === "auth" && (
             <div>
               <h1 className="text-2xl font-semibold mb-2">Authentication</h1>
-              <p className="text-gray-400 mb-6">Email + Password + 6-digit verification code</p>
+              <p className="text-gray-400 mb-6">Email + Password + 6-digit code</p>
 
-              <div className="grid gap-6 max-w-2xl">
-                <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-                  <h3 className="font-medium mb-4">How Auth works</h3>
-                  <ol className="list-decimal list-inside space-y-2 text-gray-300 text-sm">
-                    <li>User signs up with <strong>Email + Password</strong></li>
-                    <li>System sends a <strong>6-digit code</strong> to the email</li>
-                    <li>User enters the code → account verified</li>
-                    <li>Later logins use Email + Password only</li>
-                  </ol>
-                </div>
-
-                <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-                  <h3 className="font-medium mb-3">API Endpoints</h3>
-                  <div className="space-y-2 text-sm font-mono text-gray-400">
-                    <div>POST /auth/v1/signup</div>
-                    <div>POST /auth/v1/verify</div>
-                    <div>POST /auth/v1/login</div>
-                    <div>GET  /auth/v1/user</div>
+              {user ? (
+                <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 max-w-md">
+                  <div className="flex items-center gap-2 text-green-400 mb-4">
+                    <CheckCircle size={20} />
+                    <span className="font-medium">Logged in</span>
                   </div>
+                  <div className="space-y-2 text-sm">
+                    <div><span className="text-gray-400">Email:</span> {user.email}</div>
+                    <div><span className="text-gray-400">User ID:</span> <span className="font-mono text-xs">{user.id}</span></div>
+                  </div>
+                  <button onClick={handleLogout} className="mt-6 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm">
+                    Logout
+                  </button>
                 </div>
-              </div>
+              ) : (
+                <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 max-w-md">
+                  {/* Tabs */}
+                  <div className="flex gap-2 mb-6">
+                    <button
+                      onClick={() => { setAuthMode("login"); setAuthMsg(""); }}
+                      className={`px-4 py-2 rounded-lg text-sm ${
+authMode === "login" ? "bg-violet-600" : "bg-gray-800"}`}
+                    >Login</button>
+                    <button
+                      onClick={() => { setAuthMode("signup"); setAuthMsg(""); }}
+                      className={`px-4 py-2 rounded-lg text-sm ${
+authMode === "signup" ? "bg-violet-600" : "bg-gray-800"}`}
+                    >Sign Up</button>
+                    {authMode === "verify" && (
+                      <button className="px-4 py-2 rounded-lg text-sm bg-violet-600">Verify</button>
+                    )}
+                  </div>
+
+                  {authMode !== "verify" && (
+                    <>
+                      <input
+                        type="email"
+                        placeholder="Email"
+                        value={email}
+                        onChange={e => setEmail(e.target.value)}
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 mb-3 text-sm focus:outline-none focus:border-violet-500"
+                      />
+                      <input
+                        type="password"
+                        placeholder="Password"
+                        value={password}
+                        onChange={e => setPassword(e.target.value)}
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 mb-4 text-sm focus:outline-none focus:border-violet-500"
+                      />
+                    </>
+                  )}
+
+                  {authMode === "verify" && (
+                    <>
+                      <p className="text-sm text-gray-400 mb-3">Enter the 6-digit code sent to <strong>{email}</strong></p>
+                      {devCode && (
+                        <p className="text-xs text-yellow-400 mb-3">Dev code: <strong>{devCode}</strong></p>
+                      )}
+                      <input
+                        type="text"
+                        placeholder="6-digit code"
+                        value={code}
+                        onChange={e => setCode(e.target.value)}
+                        maxLength={6}
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 mb-4 text-sm focus:outline-none focus:border-violet-500 tracking-widest text-center text-lg"
+                      />
+                    </>
+                  )}
+
+                  <button
+                    onClick={authMode === "login" ? handleLogin : authMode === "signup" ? handleSignup : handleVerify}
+                    disabled={authLoading}
+                    className="w-full py-2.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {authLoading && <Loader2 size={16} className="animate-spin" />}
+                    {authMode === "login" ? "Login" : authMode === "signup" ? "Create Account" : "Verify Code"}
+                  </button>
+
+                  {authMsg && (
+                    <p className={`mt-4 text-sm ${authMsg.includes("success") || authMsg.includes("Verified") || authMsg.includes("created") ? "text-green-400" : "text-red-400"}`}>
+                      {authMsg}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -156,11 +392,8 @@ export default function DashboardPage() {
             <div>
               <div className="flex items-center justify-between mb-6">
                 <h1 className="text-2xl font-semibold">Database</h1>
-                <button onClick={fetchScores} className="px-4 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm">
-                  Refresh
-                </button>
+                <button onClick={fetchScores} className="px-4 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm">Refresh</button>
               </div>
-
               <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
                 <div className="px-5 py-3 border-b border-gray-800 text-sm text-gray-400">
                   Table: <span className="text-violet-400">game_scores</span>
@@ -189,17 +422,52 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* ==================== STORAGE ==================== */}
+          {/* ==================== STORAGE (with Upload) ==================== */}
           {active === "storage" && (
             <div>
               <h1 className="text-2xl font-semibold mb-6">Storage</h1>
-              <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-                <p className="text-gray-300 mb-4">Upload game assets, images, files via the API.</p>
-                <div className="text-sm font-mono text-gray-400 space-y-1">
-                  <div>POST /storage/v1/object/:bucket/:key</div>
-                  <div>GET  /storage/v1/object/:bucket/:key</div>
-                </div>
+
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-6">
+                <h3 className="font-medium mb-4 flex items-center gap-2"><Upload size={18} /> Upload File</h3>
+                
+                {!token && (
+                  <p className="text-yellow-400 text-sm mb-4">You need to login first (go to Authentication)</p>
+                )}
+
+                <input
+                  ref={fileRef}
+                  type="file"
+                  onChange={handleUpload}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => fileRef.current?.click()}
+                  disabled={!token}
+                  className="px-5 py-2.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium disabled:opacity-40"
+                >
+                  Choose File & Upload
+                </button>
+
+                {uploadStatus && (
+                  <p className={`mt-3 text-sm ${uploadStatus.includes("success") ? "text-green-400" : uploadStatus.includes("Uploading") ? "text-blue-400" : "text-red-400"}`}>
+                    {uploadStatus}
+                  </p>
+                )}
               </div>
+
+              {uploadedFiles.length > 0 && (
+                <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+                  <div className="px-5 py-3 border-b border-gray-800 text-sm text-gray-400">Uploaded Files</div>
+                  <div className="divide-y divide-gray-800">
+                    {uploadedFiles.map((f, i) => (
+                      <div key={i} className="px-5 py-3 flex items-center justify-between text-sm">
+                        <span>{f.name}</span>
+                        <span className="text-gray-500">{(f.size / 1024).toFixed(1)} KB</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -207,13 +475,11 @@ export default function DashboardPage() {
           {active === "realtime" && (
             <div>
               <h1 className="text-2xl font-semibold mb-6">Realtime</h1>
-
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
                 <Card title="Connected Clients" value={realtimeStats?.totalClients ?? 0} />
                 <Card title="Active Rooms" value={realtimeStats?.rooms?.length ?? 0} />
                 <Card title="Endpoint" value="/realtime/v1" />
               </div>
-
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
                 <h3 className="font-medium mb-4">Active Rooms</h3>
                 {realtimeStats?.rooms?.length ? (
@@ -229,19 +495,6 @@ export default function DashboardPage() {
                   <p className="text-gray-500">No active rooms right now</p>
                 )}
               </div>
-
-              <div className="mt-6 bg-gray-900 border border-gray-800 rounded-xl p-6">
-                <h3 className="font-medium mb-3">How to use (SDK)</h3>
-                <pre className="text-xs text-gray-400 overflow-auto bg-gray-950 p-4 rounded-lg">{
-`const client = new KotahClient({ url: "http://localhost:4000" });
-
-const channel = client.channel("lobby")
-  .on("message", (msg) => console.log(msg))
-  .subscribe();
-
-channel.send({ hello: "world" });`
-                }</pre>
-              </div>
             </div>
           )}
 
@@ -249,8 +502,47 @@ channel.send({ hello: "world" });`
           {active === "hosting" && (
             <div>
               <h1 className="text-2xl font-semibold mb-6">Hosting</h1>
-              <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-                <p className="text-gray-400">Static website + serverless functions hosting will be added next.</p>
+
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-6">
+                <h3 className="font-medium mb-4">Deploy New Site</h3>
+                <div className="flex gap-3">
+                  <input
+                    type="text"
+                    placeholder="Site name (e.g. my-game)"
+                    value={newSiteName}
+                    onChange={e => setNewSiteName(e.target.value)}
+                    className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-violet-500"
+                  />
+                  <button
+                    onClick={createSite}
+                    className="px-5 py-2.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium"
+                  >
+                    Deploy
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 mt-2">This is a preview. Real static hosting will be connected next.</p>
+              </div>
+
+              <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+                <div className="px-5 py-3 border-b border-gray-800 text-sm text-gray-400">Your Sites</div>
+                <div className="divide-y divide-gray-800">
+                  {sites.map(site => (
+                    <div key={site.id} className="px-5 py-4 flex items-center justify-between">
+                      <div>
+                        <div className="font-medium">{site.name}</div>
+                        <div className="text-sm text-gray-500">{site.url}</div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <span className={`text-xs px-2.5 py-1 rounded-full ${
+                          site.status === "Live" ? "bg-green-500/20 text-green-400" : "bg-yellow-500/20 text-yellow-400"
+                        }`}>
+                          {site.status}
+                        </span>
+                        <span className="text-xs text-gray-500">{site.updated}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           )}
@@ -259,16 +551,18 @@ channel.send({ hello: "world" });`
           {active === "settings" && (
             <div>
               <h1 className="text-2xl font-semibold mb-6">Settings</h1>
-              <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 max-w-xl">
-                <div className="space-y-4 text-sm">
-                  <div>
-                    <div className="text-gray-400 mb-1">API URL</div>
-                    <div className="font-mono bg-gray-800 px-3 py-2 rounded">{API_URL}</div>
-                  </div>
-                  <div>
-                    <div className="text-gray-400 mb-1">Version</div>
-                    <div>0.1.5</div>
-                  </div>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 max-w-xl space-y-4 text-sm">
+                <div>
+                  <div className="text-gray-400 mb-1">API URL</div>
+                  <div className="font-mono bg-gray-800 px-3 py-2 rounded">{API_URL}</div>
+                </div>
+                <div>
+                  <div className="text-gray-400 mb-1">Logged in as</div>
+                  <div>{user ? user.email : "Not logged in"}</div>
+                </div>
+                <div>
+                  <div className="text-gray-400 mb-1">Version</div>
+                  <div>0.1.6</div>
                 </div>
               </div>
             </div>
