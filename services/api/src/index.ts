@@ -4,12 +4,13 @@ import { cors } from "hono/cors";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { v4 as uuidv4 } from "uuid";
-import { query, pool } from "./db/client";
+import { query } from "./db/client";
 import dotenv from "dotenv";
 
 dotenv.config();
 
 const app = new Hono();
+
 app.use("*", cors({
   origin: "*",
   allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -17,6 +18,27 @@ app.use("*", cors({
 }));
 
 const JWT_SECRET = process.env.JWT_SECRET || "kotahbase-dev-secret-change-me";
+
+// Simple in-memory rate limit (per IP)
+const rateLimitMap = new Map<string, { count: number; reset: number }>();
+const RATE_LIMIT = 100; // requests
+const RATE_WINDOW = 60 * 1000; // 1 minute
+
+app.use("*", async (c, next) => {
+  const ip = c.req.header("x-forwarded-for") || "unknown";
+  const now = Date.now();
+  const entry = rateLimitMap.get(ip);
+
+  if (!entry || now > entry.reset) {
+    rateLimitMap.set(ip, { count: 1, reset: now + RATE_WINDOW });
+  } else {
+    entry.count++;
+    if (entry.count > RATE_LIMIT) {
+      return c.json({ error: "Too many requests. Try again later." }, 429);
+    }
+  }
+  await next();
+});
 
 function generateOTP(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -38,14 +60,26 @@ async function getUserFromToken(authHeader: string | undefined) {
   }
 }
 
-// ====================== ROOT ======================
+// ====================== ROOT & INFO ======================
 app.get("/", (c) => {
   return c.json({
     name: "KotahBase API",
-    version: "0.1.7",
+    version: "0.2.0",
     status: "ok",
-    message: "KotahBase is running",
-    features: ["Auth", "Database", "Projects"]
+    message: "KotahBase — Backend for apps, websites & games",
+    features: [
+      "Auth (Email + Password + 6-digit code)",
+      "Projects",
+      "API Keys",
+      "Database REST",
+      "Usage Stats",
+      "Rate Limiting"
+    ],
+    limits: {
+      plan: "free",
+      ram: "512MB (Render free tier)",
+      note: "Upgrade for more capacity"
+    }
   });
 });
 
@@ -55,34 +89,34 @@ app.get("/health", async (c) => {
     return c.json({
       status: "healthy",
       database: "connected",
+      version: "0.2.0",
       timestamp: new Date().toISOString()
     });
   } catch (err: any) {
-    return c.json({
-      status: "unhealthy",
-      database: "disconnected",
-      error: err.message
-    }, 500);
+    return c.json({ status: "unhealthy", database: "disconnected", error: err.message }, 500);
   }
+});
+
+app.get("/limits", (c) => {
+  return c.json({
+    plan: "free",
+    ram: "512 MB",
+    max_concurrent_users: "~30-50",
+    sleep_after: "15 minutes of inactivity",
+    recommended_for: "Development, testing, small apps & early games",
+    upgrade_note: "Move to paid plan ($7+/mo) for 2GB+ RAM and always-on"
+  });
 });
 
 // ====================== AUTH ======================
 app.post("/auth/v1/signup", async (c) => {
   try {
-    const body = await c.req.json();
-    const { email, password } = body;
-
-    if (!email || !password) {
-      return c.json({ error: "Email and password are required" }, 400);
-    }
-    if (password.length < 8) {
-      return c.json({ error: "Password must be at least 8 characters" }, 400);
-    }
+    const { email, password } = await c.req.json();
+    if (!email || !password) return c.json({ error: "Email and password are required" }, 400);
+    if (password.length < 8) return c.json({ error: "Password must be at least 8 characters" }, 400);
 
     const existing = await query("SELECT id FROM users WHERE email = $1", [email.toLowerCase()]);
-    if (existing.rows.length > 0) {
-      return c.json({ error: "Email already registered" }, 400);
-    }
+    if (existing.rows.length > 0) return c.json({ error: "Email already registered" }, 400);
 
     const hashed = await bcrypt.hash(password, 10);
     const id = uuidv4();
@@ -100,11 +134,11 @@ app.post("/auth/v1/signup", async (c) => {
       [email.toLowerCase(), code]
     );
 
-    console.log(`[AUTH] Signup OTP for ${email}: ${code}`);
+    console.log(`[AUTH] OTP for ${email}: ${code}`);
 
     return c.json({
       message: "Account created. 6-digit code sent.",
-      dev_code: process.env.NODE_ENV === "production" ? undefined : code
+      dev_code: code // keep visible for now so you can test easily
     });
   } catch (err: any) {
     console.error("[AUTH] Signup error:", err.message);
@@ -117,42 +151,24 @@ app.post("/auth/v1/verify", async (c) => {
     const { email, code } = await c.req.json();
     if (!email || !code) return c.json({ error: "Email and code required" }, 400);
 
-    const otpRes = await query(
-      "SELECT code, expires_at FROM otp_codes WHERE email = $1",
-      [email.toLowerCase()]
-    );
-
-    if (otpRes.rows.length === 0) {
-      return c.json({ error: "No code found" }, 400);
-    }
+    const otpRes = await query("SELECT code, expires_at FROM otp_codes WHERE email = $1", [email.toLowerCase()]);
+    if (otpRes.rows.length === 0) return c.json({ error: "No code found" }, 400);
 
     const record = otpRes.rows[0];
     if (new Date() > new Date(record.expires_at)) {
       await query("DELETE FROM otp_codes WHERE email = $1", [email.toLowerCase()]);
       return c.json({ error: "Code expired" }, 400);
     }
-
-    if (record.code !== code) {
-      return c.json({ error: "Invalid code" }, 401);
-    }
+    if (record.code !== code) return c.json({ error: "Invalid code" }, 401);
 
     await query("DELETE FROM otp_codes WHERE email = $1", [email.toLowerCase()]);
     await query("UPDATE users SET email_confirmed = true WHERE email = $1", [email.toLowerCase()]);
 
-    const userRes = await query(
-      "SELECT id, email, created_at FROM users WHERE email = $1",
-      [email.toLowerCase()]
-    );
+    const userRes = await query("SELECT id, email, created_at FROM users WHERE email = $1", [email.toLowerCase()]);
     const user = userRes.rows[0];
-
     const token = createToken({ sub: user.id, email: user.email });
 
-    return c.json({
-      access_token: token,
-      token_type: "bearer",
-      expires_in: 604800,
-      user
-    });
+    return c.json({ access_token: token, token_type: "bearer", expires_in: 604800, user });
   } catch (err: any) {
     console.error("[AUTH] Verify error:", err.message);
     return c.json({ error: "Verification failed" }, 500);
@@ -165,31 +181,19 @@ app.post("/auth/v1/login", async (c) => {
     if (!email || !password) return c.json({ error: "Email and password required" }, 400);
 
     const res = await query("SELECT * FROM users WHERE email = $1", [email.toLowerCase()]);
-    if (res.rows.length === 0) {
-      return c.json({ error: "Invalid email or password" }, 401);
-    }
+    if (res.rows.length === 0) return c.json({ error: "Invalid email or password" }, 401);
 
     const user = res.rows[0];
     const valid = await bcrypt.compare(password, user.password);
-    if (!valid) {
-      return c.json({ error: "Invalid email or password" }, 401);
-    }
-
-    if (!user.email_confirmed) {
-      return c.json({ error: "Please verify your email with the 6-digit code first" }, 403);
-    }
+    if (!valid) return c.json({ error: "Invalid email or password" }, 401);
+    if (!user.email_confirmed) return c.json({ error: "Please verify your email first" }, 403);
 
     const token = createToken({ sub: user.id, email: user.email });
-
     return c.json({
       access_token: token,
       token_type: "bearer",
       expires_in: 604800,
-      user: {
-        id: user.id,
-        email: user.email,
-        created_at: user.created_at
-      }
+      user: { id: user.id, email: user.email, created_at: user.created_at }
     });
   } catch (err: any) {
     console.error("[AUTH] Login error:", err.message);
@@ -203,6 +207,25 @@ app.get("/auth/v1/user", async (c) => {
   return c.json(user);
 });
 
+// ====================== STATS ======================
+app.get("/stats", async (c) => {
+  try {
+    const users = await query("SELECT COUNT(*) FROM users");
+    const projects = await query("SELECT COUNT(*) FROM projects");
+    const scores = await query("SELECT COUNT(*) FROM game_scores");
+
+    return c.json({
+      users: Number(users.rows[0].count),
+      projects: Number(projects.rows[0].count),
+      game_scores: Number(scores.rows[0].count),
+      plan: "free",
+      ram: "512MB"
+    });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
 // ====================== PROJECTS ======================
 app.post("/projects", async (c) => {
   try {
@@ -210,17 +233,10 @@ app.post("/projects", async (c) => {
     if (!user) return c.json({ error: "Not authenticated" }, 401);
 
     const { name, password } = await c.req.json();
-    if (!name || !password) {
-      return c.json({ error: "Project name and password required" }, 400);
-    }
+    if (!name || !password) return c.json({ error: "Project name and password required" }, 400);
 
-    const existing = await query(
-      "SELECT id FROM projects WHERE LOWER(name) = LOWER($1)",
-      [name]
-    );
-    if (existing.rows.length > 0) {
-      return c.json({ error: "Project name already taken" }, 400);
-    }
+    const existing = await query("SELECT id FROM projects WHERE LOWER(name) = LOWER($1)", [name]);
+    if (existing.rows.length > 0) return c.json({ error: "Project name already taken" }, 400);
 
     const hashed = await bcrypt.hash(password, 10);
     const id = uuidv4();
@@ -231,14 +247,9 @@ app.post("/projects", async (c) => {
       [id, name, hashed, user.id, apiKey]
     );
 
-    return c.json({
-      id,
-      name,
-      api_key: apiKey,
-      created_at: new Date().toISOString()
-    });
+    return c.json({ id, name, api_key: apiKey, created_at: new Date().toISOString() });
   } catch (err: any) {
-    console.error("[PROJECTS] Create error:", err.message);
+    console.error("[PROJECTS] error:", err.message);
     return c.json({ error: "Failed to create project" }, 500);
   }
 });
@@ -254,13 +265,29 @@ app.get("/projects", async (c) => {
   return c.json(res.rows);
 });
 
+app.delete("/projects/:id", async (c) => {
+  try {
+    const user = await getUserFromToken(c.req.header("Authorization"));
+    if (!user) return c.json({ error: "Not authenticated" }, 401);
+
+    const id = c.req.param("id");
+    const res = await query(
+      "DELETE FROM projects WHERE id = $1 AND owner_id = $2 RETURNING id",
+      [id, user.id]
+    );
+
+    if (res.rows.length === 0) return c.json({ error: "Project not found" }, 404);
+    return c.json({ message: "Project deleted" });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
 // ====================== DATABASE ======================
 app.get("/rest/v1/:table", async (c) => {
   try {
     const table = c.req.param("table");
-    if (table !== "game_scores") {
-      return c.json({ error: "Table not allowed" }, 403);
-    }
+    if (table !== "game_scores") return c.json({ error: "Table not allowed" }, 403);
     const res = await query(`SELECT * FROM ${table} ORDER BY created_at DESC LIMIT 100`);
     return c.json(res.rows);
   } catch (err: any) {
@@ -287,7 +314,7 @@ app.post("/rest/v1/:table", async (c) => {
   }
 });
 
-// ====================== ENSURE TABLES ON START ======================
+// ====================== ENSURE TABLES ======================
 async function ensureTables() {
   try {
     await query(`
@@ -327,31 +354,22 @@ async function ensureTables() {
     `);
     console.log("[DB] Tables ready");
   } catch (err: any) {
-    console.error("[DB] Table creation error:", err.message);
+    console.error("[DB] Error:", err.message);
   }
 }
 
 // ====================== START ======================
 const port = Number(process.env.PORT) || 4000;
 
-console.log("Starting KotahBase API...");
+console.log("Starting KotahBase v0.2.0...");
 console.log("PORT:", port);
-console.log("DATABASE_URL exists:", !!process.env.DATABASE_URL);
+console.log("DATABASE_URL set:", !!process.env.DATABASE_URL);
 
 ensureTables().then(() => {
-  serve({
-    fetch: app.fetch,
-    port
-  }, (info) => {
-    console.log(`\n🚀 KotahBase API running on port ${info.port}`);
-    console.log(`   Health: /health`);
-    console.log(`   Auth:   /auth/v1/signup | /auth/v1/verify | /auth/v1/login\n`);
+  serve({ fetch: app.fetch, port }, (info) => {
+    console.log(`\n🚀 KotahBase running on port ${info.port}`);
+    console.log("   /health  /stats  /limits  /auth  /projects\n");
   });
-}).catch((err) => {
-  console.error("Failed to start:", err);
-  // Still try to start even if tables fail
-  serve({
-    fetch: app.fetch,
-    port
-  });
+}).catch(() => {
+  serve({ fetch: app.fetch, port });
 });
