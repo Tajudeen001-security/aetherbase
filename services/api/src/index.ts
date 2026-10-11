@@ -5,6 +5,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { v4 as uuidv4 } from "uuid";
 import { query } from "./db/client";
+import { uploadFile, listFiles, deleteFile, hasS3 } from "./storage";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -19,22 +20,20 @@ app.use("*", cors({
 
 const JWT_SECRET = process.env.JWT_SECRET || "kotahbase-dev-secret-change-me";
 
-// Simple in-memory rate limit (per IP)
 const rateLimitMap = new Map<string, { count: number; reset: number }>();
-const RATE_LIMIT = 100; // requests
-const RATE_WINDOW = 60 * 1000; // 1 minute
+const RATE_LIMIT = 120;
+const RATE_WINDOW = 60 * 1000;
 
 app.use("*", async (c, next) => {
   const ip = c.req.header("x-forwarded-for") || "unknown";
   const now = Date.now();
   const entry = rateLimitMap.get(ip);
-
   if (!entry || now > entry.reset) {
     rateLimitMap.set(ip, { count: 1, reset: now + RATE_WINDOW });
   } else {
     entry.count++;
     if (entry.count > RATE_LIMIT) {
-      return c.json({ error: "Too many requests. Try again later." }, 429);
+      return c.json({ error: "Too many requests" }, 429);
     }
   }
   await next();
@@ -60,25 +59,26 @@ async function getUserFromToken(authHeader: string | undefined) {
   }
 }
 
-// ====================== ROOT & INFO ======================
+// ====================== ROOT ======================
 app.get("/", (c) => {
   return c.json({
     name: "KotahBase API",
-    version: "0.2.0",
+    version: "0.3.0",
     status: "ok",
     message: "KotahBase — Backend for apps, websites & games",
     features: [
       "Auth (Email + Password + 6-digit code)",
       "Projects",
-      "API Keys",
       "Database REST",
+      "File Storage (Naijacloud - Port Harcourt)",
       "Usage Stats",
       "Rate Limiting"
     ],
+    storage: hasS3 ? "Naijacloud (af-west)" : "Not configured",
     limits: {
       plan: "free",
       ram: "512MB (Render free tier)",
-      note: "Upgrade for more capacity"
+      storage: "5GB free on Naijacloud"
     }
   });
 });
@@ -89,11 +89,29 @@ app.get("/health", async (c) => {
     return c.json({
       status: "healthy",
       database: "connected",
-      version: "0.2.0",
+      storage: hasS3 ? "connected" : "not configured",
+      version: "0.3.0",
       timestamp: new Date().toISOString()
     });
   } catch (err: any) {
-    return c.json({ status: "unhealthy", database: "disconnected", error: err.message }, 500);
+    return c.json({ status: "unhealthy", error: err.message }, 500);
+  }
+});
+
+app.get("/stats", async (c) => {
+  try {
+    const users = await query("SELECT COUNT(*) FROM users");
+    const projects = await query("SELECT COUNT(*) FROM projects");
+    const scores = await query("SELECT COUNT(*) FROM game_scores");
+    return c.json({
+      users: Number(users.rows[0].count),
+      projects: Number(projects.rows[0].count),
+      game_scores: Number(scores.rows[0].count),
+      storage: hasS3 ? "Naijacloud" : "none",
+      plan: "free"
+    });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
   }
 });
 
@@ -101,10 +119,10 @@ app.get("/limits", (c) => {
   return c.json({
     plan: "free",
     ram: "512 MB",
+    storage: "5 GB (Naijacloud Port Harcourt)",
     max_concurrent_users: "~30-50",
-    sleep_after: "15 minutes of inactivity",
-    recommended_for: "Development, testing, small apps & early games",
-    upgrade_note: "Move to paid plan ($7+/mo) for 2GB+ RAM and always-on"
+    data_residency: "Nigeria (Port Harcourt)",
+    sleep_after: "15 minutes of inactivity"
   });
 });
 
@@ -138,7 +156,7 @@ app.post("/auth/v1/signup", async (c) => {
 
     return c.json({
       message: "Account created. 6-digit code sent.",
-      dev_code: code // keep visible for now so you can test easily
+      dev_code: code
     });
   } catch (err: any) {
     console.error("[AUTH] Signup error:", err.message);
@@ -205,25 +223,6 @@ app.get("/auth/v1/user", async (c) => {
   const user = await getUserFromToken(c.req.header("Authorization"));
   if (!user) return c.json({ error: "Not authenticated" }, 401);
   return c.json(user);
-});
-
-// ====================== STATS ======================
-app.get("/stats", async (c) => {
-  try {
-    const users = await query("SELECT COUNT(*) FROM users");
-    const projects = await query("SELECT COUNT(*) FROM projects");
-    const scores = await query("SELECT COUNT(*) FROM game_scores");
-
-    return c.json({
-      users: Number(users.rows[0].count),
-      projects: Number(projects.rows[0].count),
-      game_scores: Number(scores.rows[0].count),
-      plan: "free",
-      ram: "512MB"
-    });
-  } catch (err: any) {
-    return c.json({ error: err.message }, 500);
-  }
 });
 
 // ====================== PROJECTS ======================
@@ -314,6 +313,45 @@ app.post("/rest/v1/:table", async (c) => {
   }
 });
 
+// ====================== STORAGE (Naijacloud) ======================
+app.post("/storage/v1/object/:bucket/:key", async (c) => {
+  try {
+    if (!hasS3) return c.json({ error: "Storage not configured" }, 503);
+
+    const key = c.req.param("key");
+    const contentType = c.req.header("content-type") || "application/octet-stream";
+    const body = await c.req.arrayBuffer();
+    const buffer = Buffer.from(body);
+
+    const result = await uploadFile(key, buffer, contentType);
+    return c.json(result, 201);
+  } catch (err: any) {
+    console.error("[Storage] Upload error:", err.message);
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+app.get("/storage/v1/list", async (c) => {
+  try {
+    if (!hasS3) return c.json({ error: "Storage not configured" }, 503);
+    const files = await listFiles();
+    return c.json(files);
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+app.delete("/storage/v1/object/:key", async (c) => {
+  try {
+    if (!hasS3) return c.json({ error: "Storage not configured" }, 503);
+    const key = c.req.param("key");
+    await deleteFile(key);
+    return c.json({ message: "Deleted", key });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
 // ====================== ENSURE TABLES ======================
 async function ensureTables() {
   try {
@@ -361,14 +399,13 @@ async function ensureTables() {
 // ====================== START ======================
 const port = Number(process.env.PORT) || 4000;
 
-console.log("Starting KotahBase v0.2.0...");
-console.log("PORT:", port);
-console.log("DATABASE_URL set:", !!process.env.DATABASE_URL);
+console.log("Starting KotahBase v0.3.0...");
+console.log("Storage: Naijacloud (Port Harcourt)");
 
 ensureTables().then(() => {
   serve({ fetch: app.fetch, port }, (info) => {
     console.log(`\n🚀 KotahBase running on port ${info.port}`);
-    console.log("   /health  /stats  /limits  /auth  /projects\n");
+    console.log("   Storage → Naijacloud af-west\n");
   });
 }).catch(() => {
   serve({ fetch: app.fetch, port });
