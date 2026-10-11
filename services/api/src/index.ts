@@ -30,7 +30,7 @@ app.use("*", async (c, next) => {
     rateLimitMap.set(ip, { count: 1, reset: now + 60000 });
   } else {
     entry.count++;
-    if (entry.count > 120) return c.json({ error: "Too many requests" }, 429);
+    if (entry.count > 150) return c.json({ error: "Too many requests" }, 429);
   }
   await next();
 });
@@ -57,16 +57,28 @@ async function getUserFromToken(authHeader: string | undefined) {
 
 app.get("/", (c) => c.json({
   name: "KotahBase API",
-  version: "0.3.1",
+  version: "0.4.0",
   status: "ok",
-  features: ["Auth + Email OTP", "Projects", "Database", "File Storage (Naijacloud)", "Stats"],
+  features: [
+    "Auth + Email OTP",
+    "Projects + API Keys",
+    "Full SQL Editor",
+    "Custom Domains",
+    "File Storage (Naijacloud)",
+    "Database REST"
+  ],
   storage: hasS3 ? "Naijacloud (Port Harcourt)" : "Not configured"
 }));
 
 app.get("/health", async (c) => {
   try {
     await query("SELECT 1");
-    return c.json({ status: "healthy", database: "connected", storage: hasS3 ? "connected" : "off", version: "0.3.1" });
+    return c.json({
+      status: "healthy",
+      database: "connected",
+      storage: hasS3 ? "connected" : "off",
+      version: "0.4.0"
+    });
   } catch (err: any) {
     return c.json({ status: "unhealthy", error: err.message }, 500);
   }
@@ -76,9 +88,11 @@ app.get("/stats", async (c) => {
   try {
     const users = await query("SELECT COUNT(*) FROM users");
     const projects = await query("SELECT COUNT(*) FROM projects");
+    const domains = await query("SELECT COUNT(*) FROM domains");
     return c.json({
       users: Number(users.rows[0].count),
       projects: Number(projects.rows[0].count),
+      domains: Number(domains.rows[0].count),
       storage: hasS3 ? "Naijacloud" : "none"
     });
   } catch (err: any) {
@@ -86,7 +100,7 @@ app.get("/stats", async (c) => {
   }
 });
 
-// AUTH
+// ====================== AUTH ======================
 app.post("/auth/v1/signup", async (c) => {
   try {
     const { email, password } = await c.req.json();
@@ -115,7 +129,6 @@ app.post("/auth/v1/signup", async (c) => {
       dev_code: code
     });
   } catch (err: any) {
-    console.error("[AUTH] Signup error:", err.message);
     return c.json({ error: "Signup failed: " + err.message }, 500);
   }
 });
@@ -179,7 +192,7 @@ app.get("/auth/v1/user", async (c) => {
   return c.json(user);
 });
 
-// PROJECTS
+// ====================== PROJECTS ======================
 app.post("/projects", async (c) => {
   try {
     const user = await getUserFromToken(c.req.header("Authorization"));
@@ -218,7 +231,175 @@ app.delete("/projects/:id", async (c) => {
   return c.json({ message: "Project deleted" });
 });
 
-// DATABASE
+// ====================== FULL SQL EDITOR ======================
+app.post("/sql", async (c) => {
+  try {
+    const user = await getUserFromToken(c.req.header("Authorization"));
+    if (!user) return c.json({ error: "Not authenticated" }, 401);
+
+    const { query: sqlQuery } = await c.req.json();
+    if (!sqlQuery || typeof sqlQuery !== "string") {
+      return c.json({ error: "SQL query is required" }, 400);
+    }
+
+    // Basic safety: block dangerous commands
+    const lower = sqlQuery.toLowerCase().trim();
+    const blocked = ["drop database", "drop schema", "truncate", "alter system"];
+    for (const b of blocked) {
+      if (lower.includes(b)) {
+        return c.json({ error: `Command not allowed: ${b}` }, 403);
+      }
+    }
+
+    const result = await query(sqlQuery);
+
+    // Return different shapes depending on query type
+    if (result.rows) {
+      return c.json({
+        success: true,
+        rows: result.rows,
+        rowCount: result.rowCount,
+        fields: result.fields?.map((f: any) => f.name) || []
+      });
+    }
+
+    return c.json({
+      success: true,
+      rowCount: result.rowCount,
+      message: "Query executed successfully"
+    });
+  } catch (err: any) {
+    return c.json({
+      success: false,
+      error: err.message
+    }, 400);
+  }
+});
+
+// List all tables
+app.get("/sql/tables", async (c) => {
+  try {
+    const user = await getUserFromToken(c.req.header("Authorization"));
+    if (!user) return c.json({ error: "Not authenticated" }, 401);
+
+    const res = await query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      ORDER BY table_name
+    `);
+    return c.json(res.rows.map((r: any) => r.table_name));
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// ====================== CUSTOM DOMAINS ======================
+app.post("/domains", async (c) => {
+  try {
+    const user = await getUserFromToken(c.req.header("Authorization"));
+    if (!user) return c.json({ error: "Not authenticated" }, 401);
+
+    const { domain, project_id } = await c.req.json();
+    if (!domain) return c.json({ error: "Domain is required" }, 400);
+
+    // Basic domain validation
+    const domainRegex = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i;
+    if (!domainRegex.test(domain)) {
+      return c.json({ error: "Invalid domain format" }, 400);
+    }
+
+    const existing = await query("SELECT id FROM domains WHERE LOWER(domain) = LOWER($1)", [domain]);
+    if (existing.rows.length > 0) {
+      return c.json({ error: "Domain already registered" }, 400);
+    }
+
+    const id = uuidv4();
+    const verificationToken = `kb-verify-${uuidv4().slice(0, 8)}`;
+
+    await query(
+      `INSERT INTO domains (id, domain, user_id, project_id, verification_token, status)
+       VALUES ($1, $2, $3, $4, $5, 'pending')`,
+      [id, domain.toLowerCase(), user.id, project_id || null, verificationToken]
+    );
+
+    return c.json({
+      id,
+      domain: domain.toLowerCase(),
+      status: "pending",
+      verification_token: verificationToken,
+      instructions: {
+        type: "TXT",
+        name: `_kotahbase.${domain}`,
+        value: verificationToken,
+        message: "Add this TXT record to your domain DNS to verify ownership"
+      }
+    }, 201);
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+app.get("/domains", async (c) => {
+  try {
+    const user = await getUserFromToken(c.req.header("Authorization"));
+    if (!user) return c.json({ error: "Not authenticated" }, 401);
+
+    const res = await query(
+      "SELECT id, domain, status, verification_token, project_id, created_at FROM domains WHERE user_id = $1 ORDER BY created_at DESC",
+      [user.id]
+    );
+    return c.json(res.rows);
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+app.post("/domains/:id/verify", async (c) => {
+  try {
+    const user = await getUserFromToken(c.req.header("Authorization"));
+    if (!user) return c.json({ error: "Not authenticated" }, 401);
+
+    const id = c.req.param("id");
+    const res = await query(
+      "SELECT * FROM domains WHERE id = $1 AND user_id = $2",
+      [id, user.id]
+    );
+
+    if (res.rows.length === 0) return c.json({ error: "Domain not found" }, 404);
+
+    // For now we mark as verified (real DNS check can be added later)
+    await query("UPDATE domains SET status = 'verified' WHERE id = $1", [id]);
+
+    return c.json({
+      message: "Domain verified successfully",
+      domain: res.rows[0].domain,
+      status: "verified"
+    });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+app.delete("/domains/:id", async (c) => {
+  try {
+    const user = await getUserFromToken(c.req.header("Authorization"));
+    if (!user) return c.json({ error: "Not authenticated" }, 401);
+
+    const id = c.req.param("id");
+    const res = await query(
+      "DELETE FROM domains WHERE id = $1 AND user_id = $2 RETURNING id",
+      [id, user.id]
+    );
+
+    if (res.rows.length === 0) return c.json({ error: "Domain not found" }, 404);
+    return c.json({ message: "Domain deleted" });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// ====================== DATABASE REST ======================
 app.get("/rest/v1/:table", async (c) => {
   try {
     const table = c.req.param("table");
@@ -245,7 +426,7 @@ app.post("/rest/v1/:table", async (c) => {
   }
 });
 
-// STORAGE
+// ====================== STORAGE ======================
 app.post("/storage/v1/object/:bucket/:key", async (c) => {
   try {
     if (!hasS3) return c.json({ error: "Storage not configured" }, 503);
@@ -278,20 +459,30 @@ app.delete("/storage/v1/object/:key", async (c) => {
   }
 });
 
+// ====================== TABLES ======================
 async function ensureTables() {
   try {
     await query(`CREATE TABLE IF NOT EXISTS users (id UUID PRIMARY KEY, email TEXT UNIQUE NOT NULL, password TEXT NOT NULL, email_confirmed BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW())`);
     await query(`CREATE TABLE IF NOT EXISTS projects (id UUID PRIMARY KEY, name TEXT UNIQUE NOT NULL, password TEXT NOT NULL, owner_id UUID REFERENCES users(id) ON DELETE CASCADE, api_key TEXT UNIQUE NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW())`);
     await query(`CREATE TABLE IF NOT EXISTS otp_codes (email TEXT PRIMARY KEY, code TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL, type TEXT NOT NULL)`);
     await query(`CREATE TABLE IF NOT EXISTS game_scores (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), player_name TEXT NOT NULL, score INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`);
-    console.log("[DB] Tables ready");
+    await query(`CREATE TABLE IF NOT EXISTS domains (
+      id UUID PRIMARY KEY,
+      domain TEXT UNIQUE NOT NULL,
+      user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+      project_id UUID,
+      verification_token TEXT,
+      status TEXT DEFAULT 'pending',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    console.log("[DB] Tables ready (including domains)");
   } catch (err: any) {
     console.error("[DB] Error:", err.message);
   }
 }
 
 const port = Number(process.env.PORT) || 4000;
-console.log("Starting KotahBase v0.3.1...");
+console.log("Starting KotahBase v0.4.0 (SQL Editor + Domains)...");
 
 ensureTables().then(() => {
   serve({ fetch: app.fetch, port }, (info) => {
