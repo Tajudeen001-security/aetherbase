@@ -4,18 +4,19 @@ import { useState, useEffect, useRef } from "react";
 import {
   LayoutDashboard, Shield, Database, HardDrive, Radio,
   Globe, Settings, Menu, Users, Activity, Server, Upload,
-  CheckCircle, XCircle, Loader2
+  CheckCircle, Loader2, Code, Plus, Trash2, Copy
 } from "lucide-react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://kotahbase-api.onrender.com";
 
 const nav = [
   { name: "Dashboard", icon: LayoutDashboard, id: "dashboard" },
   { name: "Authentication", icon: Shield, id: "auth" },
   { name: "Database", icon: Database, id: "database" },
+  { name: "SQL Editor", icon: Code, id: "sql" },
   { name: "Storage", icon: HardDrive, id: "storage" },
   { name: "Realtime", icon: Radio, id: "realtime" },
-  { name: "Hosting", icon: Globe, id: "hosting" },
+  { name: "Domains", icon: Globe, id: "domains" },
   { name: "Settings", icon: Settings, id: "settings" }
 ];
 
@@ -23,12 +24,10 @@ export default function DashboardPage() {
   const [active, setActive] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [health, setHealth] = useState<any>(null);
-  const [realtimeStats, setRealtimeStats] = useState<any>(null);
-  const [scores, setScores] = useState<any[]>([]);
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
 
-  // Auth form state
+  // Auth
   const [authMode, setAuthMode] = useState<"login" | "signup" | "verify">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -37,16 +36,24 @@ export default function DashboardPage() {
   const [authLoading, setAuthLoading] = useState(false);
   const [devCode, setDevCode] = useState("");
 
-  // Storage state
+  // Database
+  const [scores, setScores] = useState<any[]>([]);
+
+  // SQL Editor
+  const [sqlQuery, setSqlQuery] = useState("SELECT * FROM game_scores LIMIT 10;");
+  const [sqlResult, setSqlResult] = useState<any>(null);
+  const [sqlLoading, setSqlLoading] = useState(false);
+  const [tables, setTables] = useState<string[]>([]);
+
+  // Storage
   const [uploadStatus, setUploadStatus] = useState("");
   const [uploadedFiles, setUploadedFiles] = useState<any[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Hosting state
-  const [sites, setSites] = useState<any[]>([
-    { id: 1, name: "my-game-landing", url: "https://my-game.kotahbase.app", status: "Live", updated: "Just now" }
-  ]);
-  const [newSiteName, setNewSiteName] = useState("");
+  // Domains
+  const [domains, setDomains] = useState<any[]>([]);
+  const [newDomain, setNewDomain] = useState("");
+  const [domainMsg, setDomainMsg] = useState("");
 
   useEffect(() => {
     const saved = localStorage.getItem("kotah_token");
@@ -55,16 +62,14 @@ export default function DashboardPage() {
       fetchUser(saved);
     }
     fetchHealth();
-    const interval = setInterval(fetchHealth, 5000);
+    const interval = setInterval(fetchHealth, 8000);
     return () => clearInterval(interval);
   }, []);
 
   async function fetchHealth() {
     try {
       const res = await fetch(`${API_URL}/health`);
-      const data = await res.json();
-      setHealth(data);
-      setRealtimeStats(data.realtime || null);
+      setHealth(await res.json());
     } catch {
       setHealth({ status: "offline" });
     }
@@ -75,10 +80,7 @@ export default function DashboardPage() {
       const res = await fetch(`${API_URL}/auth/v1/user`, {
         headers: { Authorization: `Bearer ${t}` }
       });
-      if (res.ok) {
-        const data = await res.json();
-        setUser(data);
-      }
+      if (res.ok) setUser(await res.json());
     } catch {}
   }
 
@@ -92,14 +94,35 @@ export default function DashboardPage() {
     }
   }
 
+  async function fetchTables() {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/sql/tables`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) setTables(await res.json());
+    } catch {}
+  }
+
+  async function fetchDomains() {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/domains`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) setDomains(await res.json());
+    } catch {}
+  }
+
   useEffect(() => {
     if (active === "database") fetchScores();
-  }, [active]);
+    if (active === "sql") fetchTables();
+    if (active === "domains") fetchDomains();
+  }, [active, token]);
 
-  // ========== AUTH ACTIONS ==========
+  // Auth handlers
   async function handleSignup() {
-    setAuthLoading(true);
-    setAuthMsg("");
+    setAuthLoading(true); setAuthMsg("");
     try {
       const res = await fetch(`${API_URL}/auth/v1/signup`, {
         method: "POST",
@@ -119,8 +142,7 @@ export default function DashboardPage() {
   }
 
   async function handleVerify() {
-    setAuthLoading(true);
-    setAuthMsg("");
+    setAuthLoading(true); setAuthMsg("");
     try {
       const res = await fetch(`${API_URL}/auth/v1/verify`, {
         method: "POST",
@@ -142,8 +164,7 @@ export default function DashboardPage() {
   }
 
   async function handleLogin() {
-    setAuthLoading(true);
-    setAuthMsg("");
+    setAuthLoading(true); setAuthMsg("");
     try {
       const res = await fetch(`${API_URL}/auth/v1/login`, {
         method: "POST",
@@ -164,20 +185,38 @@ export default function DashboardPage() {
   }
 
   function handleLogout() {
-    setToken(null);
-    setUser(null);
+    setToken(null); setUser(null);
     localStorage.removeItem("kotah_token");
     setAuthMsg("Logged out");
   }
 
-  // ========== STORAGE UPLOAD ==========
+  // SQL
+  async function runSQL() {
+    if (!token) { setSqlResult({ error: "Please login first" }); return; }
+    setSqlLoading(true); setSqlResult(null);
+    try {
+      const res = await fetch(`${API_URL}/sql`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ query: sqlQuery })
+      });
+      const data = await res.json();
+      setSqlResult(data);
+    } catch (err: any) {
+      setSqlResult({ error: err.message });
+    } finally {
+      setSqlLoading(false);
+    }
+  }
+
+  // Storage
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!token) {
-      setUploadStatus("Please login first");
-      return;
-    }
+    if (!token) { setUploadStatus("Please login first"); return; }
 
     setUploadStatus("Uploading...");
     try {
@@ -191,7 +230,6 @@ export default function DashboardPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Upload failed");
-
       setUploadedFiles(prev => [...prev, { name: file.name, url: data.url, size: file.size }]);
       setUploadStatus("Uploaded successfully!");
     } catch (err: any) {
@@ -199,22 +237,53 @@ export default function DashboardPage() {
     }
   }
 
-  // ========== HOSTING ==========
-  function createSite() {
-    if (!newSiteName.trim()) return;
-    const site = {
-      id: Date.now(),
-      name: newSiteName,
-      url: `https://${newSiteName.toLowerCase().replace(/\s+/g, "-")}.kotahbase.app`,
-      status: "Building",
-      updated: "Just now"
-    };
-    setSites(prev => [site, ...prev]);
-    setNewSiteName("");
-    // Simulate build finish
-    setTimeout(() => {
-      setSites(prev => prev.map(s => s.id === site.id ? { ...s, status: "Live" } : s));
-    }, 2500);
+  // Domains
+  async function addDomain() {
+    if (!token) { setDomainMsg("Please login first"); return; }
+    if (!newDomain.trim()) return;
+
+    try {
+      const res = await fetch(`${API_URL}/domains`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ domain: newDomain.trim() })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed");
+      setDomainMsg(`Domain added! Add TXT record: ${data.instructions?.value}`);
+      setNewDomain("");
+      fetchDomains();
+    } catch (err: any) {
+      setDomainMsg(err.message);
+    }
+  }
+
+  async function verifyDomain(id: string) {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/domains/${id}/verify`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setDomainMsg("Domain verified!");
+      fetchDomains();
+    } catch (err: any) {
+      setDomainMsg(err.message);
+    }
+  }
+
+  async function deleteDomain(id: string) {
+    if (!token) return;
+    await fetch(`${API_URL}/domains/${id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    fetchDomains();
   }
 
   return (
@@ -226,7 +295,7 @@ export default function DashboardPage() {
           {sidebarOpen && <span className="text-xl font-semibold">KotahBase</span>}
         </div>
 
-        <nav className="flex-1 px-3 space-y-1 mt-2">
+        <nav className="flex-1 px-3 space-y-1 mt-2 overflow-y-auto">
           {nav.map((item) => {
             const Icon = item.icon;
             const isActive = active === item.id;
@@ -247,9 +316,9 @@ export default function DashboardPage() {
 
         <div className="p-4 border-t border-gray-800 text-sm">
           {user ? (
-            <div className="text-gray-300 truncate">{user.email}</div>
+            <div className="text-gray-300 truncate text-xs">{user.email}</div>
           ) : (
-            <div className="text-gray-500">Not logged in</div>
+            <div className="text-gray-500 text-xs">Not logged in</div>
           )}
           <div className="mt-1">
             {health?.status === "healthy" ? (
@@ -276,24 +345,24 @@ export default function DashboardPage() {
         </header>
 
         <div className="p-8">
-          {/* ==================== DASHBOARD ==================== */}
+          {/* DASHBOARD */}
           {active === "dashboard" && (
             <div>
               <h1 className="text-2xl font-semibold mb-6">Overview</h1>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
                 <Card title="API Status" value={health?.status === "healthy" ? "Online" : "Offline"} icon={<Server size={18} />} />
-                <Card title="Realtime Clients" value={realtimeStats?.totalClients ?? "—"} icon={<Users size={18} />} />
-                <Card title="Active Rooms" value={realtimeStats?.rooms?.length ?? "—"} icon={<Radio size={18} />} />
                 <Card title="Database" value={health?.database === "connected" ? "Connected" : "—"} icon={<Database size={18} />} />
+                <Card title="Storage" value={health?.storage === "connected" ? "Naijacloud" : "—"} icon={<HardDrive size={18} />} />
+                <Card title="Version" value={health?.version || "—"} icon={<Activity size={18} />} />
               </div>
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-                <h2 className="font-medium mb-4 flex items-center gap-2"><Activity size={16} /> System Status</h2>
+                <h2 className="font-medium mb-4">System Status</h2>
                 <pre className="text-xs text-gray-400 overflow-auto">{JSON.stringify(health, null, 2)}</pre>
               </div>
             </div>
           )}
 
-          {/* ==================== AUTH (Interactive) ==================== */}
+          {/* AUTH */}
           {active === "auth" && (
             <div>
               <h1 className="text-2xl font-semibold mb-2">Authentication</h1>
@@ -309,62 +378,27 @@ export default function DashboardPage() {
                     <div><span className="text-gray-400">Email:</span> {user.email}</div>
                     <div><span className="text-gray-400">User ID:</span> <span className="font-mono text-xs">{user.id}</span></div>
                   </div>
-                  <button onClick={handleLogout} className="mt-6 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm">
-                    Logout
-                  </button>
+                  <button onClick={handleLogout} className="mt-6 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm">Logout</button>
                 </div>
               ) : (
                 <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 max-w-md">
-                  {/* Tabs */}
                   <div className="flex gap-2 mb-6">
-                    <button
-                      onClick={() => { setAuthMode("login"); setAuthMsg(""); }}
-                      className={`px-4 py-2 rounded-lg text-sm ${
-authMode === "login" ? "bg-violet-600" : "bg-gray-800"}`}
-                    >Login</button>
-                    <button
-                      onClick={() => { setAuthMode("signup"); setAuthMsg(""); }}
-                      className={`px-4 py-2 rounded-lg text-sm ${
-authMode === "signup" ? "bg-violet-600" : "bg-gray-800"}`}
-                    >Sign Up</button>
-                    {authMode === "verify" && (
-                      <button className="px-4 py-2 rounded-lg text-sm bg-violet-600">Verify</button>
-                    )}
+                    <button onClick={() => { setAuthMode("login"); setAuthMsg(""); }} className={`px-4 py-2 rounded-lg text-sm ${authMode === "login" ? "bg-violet-600" : "bg-gray-800"}`}>Login</button>
+                    <button onClick={() => { setAuthMode("signup"); setAuthMsg(""); }} className={`px-4 py-2 rounded-lg text-sm ${authMode === "signup" ? "bg-violet-600" : "bg-gray-800"}`}>Sign Up</button>
                   </div>
 
                   {authMode !== "verify" && (
                     <>
-                      <input
-                        type="email"
-                        placeholder="Email"
-                        value={email}
-                        onChange={e => setEmail(e.target.value)}
-                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 mb-3 text-sm focus:outline-none focus:border-violet-500"
-                      />
-                      <input
-                        type="password"
-                        placeholder="Password"
-                        value={password}
-                        onChange={e => setPassword(e.target.value)}
-                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 mb-4 text-sm focus:outline-none focus:border-violet-500"
-                      />
+                      <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 mb-3 text-sm focus:outline-none focus:border-violet-500" />
+                      <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 mb-4 text-sm focus:outline-none focus:border-violet-500" />
                     </>
                   )}
 
                   {authMode === "verify" && (
                     <>
                       <p className="text-sm text-gray-400 mb-3">Enter the 6-digit code sent to <strong>{email}</strong></p>
-                      {devCode && (
-                        <p className="text-xs text-yellow-400 mb-3">Dev code: <strong>{devCode}</strong></p>
-                      )}
-                      <input
-                        type="text"
-                        placeholder="6-digit code"
-                        value={code}
-                        onChange={e => setCode(e.target.value)}
-                        maxLength={6}
-                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 mb-4 text-sm focus:outline-none focus:border-violet-500 tracking-widest text-center text-lg"
-                      />
+                      {devCode && <p className="text-xs text-yellow-400 mb-3">Dev code: <strong>{devCode}</strong></p>}
+                      <input type="text" placeholder="6-digit code" value={code} onChange={e => setCode(e.target.value)} maxLength={6} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 mb-4 text-sm focus:outline-none focus:border-violet-500 tracking-widest text-center text-lg" />
                     </>
                   )}
 
@@ -377,17 +411,13 @@ authMode === "signup" ? "bg-violet-600" : "bg-gray-800"}`}
                     {authMode === "login" ? "Login" : authMode === "signup" ? "Create Account" : "Verify Code"}
                   </button>
 
-                  {authMsg && (
-                    <p className={`mt-4 text-sm ${authMsg.includes("success") || authMsg.includes("Verified") || authMsg.includes("created") ? "text-green-400" : "text-red-400"}`}>
-                      {authMsg}
-                    </p>
-                  )}
+                  {authMsg && <p className={`mt-4 text-sm ${authMsg.includes("success") || authMsg.includes("Verified") || authMsg.includes("created") ? "text-green-400" : "text-red-400"}`}>{authMsg}</p>}
                 </div>
               )}
             </div>
           )}
 
-          {/* ==================== DATABASE ==================== */}
+          {/* DATABASE */}
           {active === "database" && (
             <div>
               <div className="flex items-center justify-between mb-6">
@@ -395,9 +425,7 @@ authMode === "signup" ? "bg-violet-600" : "bg-gray-800"}`}
                 <button onClick={fetchScores} className="px-4 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm">Refresh</button>
               </div>
               <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                <div className="px-5 py-3 border-b border-gray-800 text-sm text-gray-400">
-                  Table: <span className="text-violet-400">game_scores</span>
-                </div>
+                <div className="px-5 py-3 border-b border-gray-800 text-sm text-gray-400">Table: <span className="text-violet-400">game_scores</span></div>
                 <table className="w-full text-sm">
                   <thead className="bg-gray-800/50 text-gray-400">
                     <tr>
@@ -422,39 +450,111 @@ authMode === "signup" ? "bg-violet-600" : "bg-gray-800"}`}
             </div>
           )}
 
-          {/* ==================== STORAGE (with Upload) ==================== */}
+          {/* SQL EDITOR */}
+          {active === "sql" && (
+            <div>
+              <h1 className="text-2xl font-semibold mb-2">SQL Editor</h1>
+              <p className="text-gray-400 mb-6">Run SQL queries against your database</p>
+
+              {!token && <p className="text-yellow-400 text-sm mb-4">Please login first to use the SQL Editor</p>}
+
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                <div className="lg:col-span-1">
+                  <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                    <h3 className="text-sm font-medium mb-3 text-gray-400">Tables</h3>
+                    {tables.length === 0 ? (
+                      <p className="text-xs text-gray-500">No tables or not logged in</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {tables.map(t => (
+                          <button
+                            key={t}
+                            onClick={() => setSqlQuery(`SELECT * FROM ${t} LIMIT 20;`)}
+                            className="w-full text-left text-sm px-2 py-1.5 rounded hover:bg-gray-800 text-violet-400 font-mono"
+                          >
+                            {t}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="lg:col-span-3 space-y-4">
+                  <textarea
+                    value={sqlQuery}
+                    onChange={e => setSqlQuery(e.target.value)}
+                    rows={6}
+                    className="w-full bg-gray-900 border border-gray-800 rounded-xl p-4 font-mono text-sm focus:outline-none focus:border-violet-500 resize-y"
+                    placeholder="SELECT * FROM game_scores;"
+                  />
+
+                  <button
+                    onClick={runSQL}
+                    disabled={sqlLoading || !token}
+                    className="px-5 py-2.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium flex items-center gap-2 disabled:opacity-40"
+                  >
+                    {sqlLoading && <Loader2 size={16} className="animate-spin" />}
+                    Run Query
+                  </button>
+
+                  {sqlResult && (
+                    <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+                      {sqlResult.error || sqlResult.success === false ? (
+                        <div className="p-4 text-red-400 text-sm">{sqlResult.error}</div>
+                      ) : (
+                        <>
+                          <div className="px-4 py-2 border-b border-gray-800 text-xs text-gray-400">
+                            {sqlResult.rowCount} row(s)
+                          </div>
+                          {sqlResult.rows && sqlResult.rows.length > 0 ? (
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-sm">
+                                <thead className="bg-gray-800/50 text-gray-400">
+                                  <tr>
+                                    {sqlResult.fields?.map((f: string) => (
+                                      <th key={f} className="text-left px-4 py-2 font-mono text-xs">{f}</th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {sqlResult.rows.map((row: any, i: number) => (
+                                    <tr key={i} className="border-t border-gray-800">
+                                      {sqlResult.fields?.map((f: string) => (
+                                        <td key={f} className="px-4 py-2 font-mono text-xs max-w-xs truncate">
+                                          {String(row[f] ?? "")}
+                                        </td>
+                                      ))}
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          ) : (
+                            <div className="p-4 text-green-400 text-sm">{sqlResult.message || "Query executed successfully"}</div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* STORAGE */}
           {active === "storage" && (
             <div>
               <h1 className="text-2xl font-semibold mb-6">Storage</h1>
-
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-6">
                 <h3 className="font-medium mb-4 flex items-center gap-2"><Upload size={18} /> Upload File</h3>
-                
-                {!token && (
-                  <p className="text-yellow-400 text-sm mb-4">You need to login first (go to Authentication)</p>
-                )}
-
-                <input
-                  ref={fileRef}
-                  type="file"
-                  onChange={handleUpload}
-                  className="hidden"
-                />
-                <button
-                  onClick={() => fileRef.current?.click()}
-                  disabled={!token}
-                  className="px-5 py-2.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium disabled:opacity-40"
-                >
+                {!token && <p className="text-yellow-400 text-sm mb-4">You need to login first</p>}
+                <input ref={fileRef} type="file" onChange={handleUpload} className="hidden" />
+                <button onClick={() => fileRef.current?.click()} disabled={!token} className="px-5 py-2.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium disabled:opacity-40">
                   Choose File & Upload
                 </button>
-
-                {uploadStatus && (
-                  <p className={`mt-3 text-sm ${uploadStatus.includes("success") ? "text-green-400" : uploadStatus.includes("Uploading") ? "text-blue-400" : "text-red-400"}`}>
-                    {uploadStatus}
-                  </p>
-                )}
+                {uploadStatus && <p className={`mt-3 text-sm ${uploadStatus.includes("success") ? "text-green-400" : "text-red-400"}`}>{uploadStatus}</p>}
               </div>
-
               {uploadedFiles.length > 0 && (
                 <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
                   <div className="px-5 py-3 border-b border-gray-800 text-sm text-gray-400">Uploaded Files</div>
@@ -471,83 +571,74 @@ authMode === "signup" ? "bg-violet-600" : "bg-gray-800"}`}
             </div>
           )}
 
-          {/* ==================== REALTIME ==================== */}
+          {/* REALTIME */}
           {active === "realtime" && (
             <div>
               <h1 className="text-2xl font-semibold mb-6">Realtime</h1>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
-                <Card title="Connected Clients" value={realtimeStats?.totalClients ?? 0} />
-                <Card title="Active Rooms" value={realtimeStats?.rooms?.length ?? 0} />
-                <Card title="Endpoint" value="/realtime/v1" />
-              </div>
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-                <h3 className="font-medium mb-4">Active Rooms</h3>
-                {realtimeStats?.rooms?.length ? (
-                  <div className="space-y-3">
-                    {realtimeStats.rooms.map((r: any) => (
-                      <div key={r.name} className="flex items-center justify-between bg-gray-800/50 rounded-lg px-4 py-3">
-                        <span className="font-mono text-violet-400">{r.name}</span>
-                        <span className="text-sm text-gray-400">{r.clients} clients</span>
+                <p className="text-gray-400">Realtime WebSocket will be re-enabled in a more stable version soon.</p>
+                <p className="text-sm text-gray-500 mt-2">Endpoint: /realtime/v1</p>
+              </div>
+            </div>
+          )}
+
+          {/* DOMAINS */}
+          {active === "domains" && (
+            <div>
+              <h1 className="text-2xl font-semibold mb-2">Custom Domains</h1>
+              <p className="text-gray-400 mb-6">Connect your own domain to KotahBase</p>
+
+              {!token && <p className="text-yellow-400 text-sm mb-4">Please login first</p>}
+
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-6">
+                <h3 className="font-medium mb-4 flex items-center gap-2"><Plus size={18} /> Add Domain</h3>
+                <div className="flex gap-3">
+                  <input
+                    type="text"
+                    placeholder="example.com"
+                    value={newDomain}
+                    onChange={e => setNewDomain(e.target.value)}
+                    className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-violet-500"
+                  />
+                  <button onClick={addDomain} disabled={!token} className="px-5 py-2.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium disabled:opacity-40">
+                    Add Domain
+                  </button>
+                </div>
+                {domainMsg && <p className="mt-3 text-sm text-yellow-400">{domainMsg}</p>}
+              </div>
+
+              <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+                <div className="px-5 py-3 border-b border-gray-800 text-sm text-gray-400">Your Domains</div>
+                {domains.length === 0 ? (
+                  <div className="px-5 py-8 text-center text-gray-500 text-sm">No domains yet</div>
+                ) : (
+                  <div className="divide-y divide-gray-800">
+                    {domains.map((d) => (
+                      <div key={d.id} className="px-5 py-4 flex items-center justify-between">
+                        <div>
+                          <div className="font-medium">{d.domain}</div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            Status: <span className={d.status === "verified" ? "text-green-400" : "text-yellow-400"}>{d.status}</span>
+                            {d.verification_token && d.status === "pending" && (
+                              <span className="ml-3 font-mono">TXT: {d.verification_token}</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          {d.status === "pending" && (
+                            <button onClick={() => verifyDomain(d.id)} className="px-3 py-1.5 bg-green-600/20 text-green-400 rounded text-xs">Verify</button>
+                          )}
+                          <button onClick={() => deleteDomain(d.id)} className="px-3 py-1.5 bg-red-600/20 text-red-400 rounded text-xs">Delete</button>
+                        </div>
                       </div>
                     ))}
                   </div>
-                ) : (
-                  <p className="text-gray-500">No active rooms right now</p>
                 )}
               </div>
             </div>
           )}
 
-          {/* ==================== HOSTING ==================== */}
-          {active === "hosting" && (
-            <div>
-              <h1 className="text-2xl font-semibold mb-6">Hosting</h1>
-
-              <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-6">
-                <h3 className="font-medium mb-4">Deploy New Site</h3>
-                <div className="flex gap-3">
-                  <input
-                    type="text"
-                    placeholder="Site name (e.g. my-game)"
-                    value={newSiteName}
-                    onChange={e => setNewSiteName(e.target.value)}
-                    className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-violet-500"
-                  />
-                  <button
-                    onClick={createSite}
-                    className="px-5 py-2.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium"
-                  >
-                    Deploy
-                  </button>
-                </div>
-                <p className="text-xs text-gray-500 mt-2">This is a preview. Real static hosting will be connected next.</p>
-              </div>
-
-              <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                <div className="px-5 py-3 border-b border-gray-800 text-sm text-gray-400">Your Sites</div>
-                <div className="divide-y divide-gray-800">
-                  {sites.map(site => (
-                    <div key={site.id} className="px-5 py-4 flex items-center justify-between">
-                      <div>
-                        <div className="font-medium">{site.name}</div>
-                        <div className="text-sm text-gray-500">{site.url}</div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <span className={`text-xs px-2.5 py-1 rounded-full ${
-                          site.status === "Live" ? "bg-green-500/20 text-green-400" : "bg-yellow-500/20 text-yellow-400"
-                        }`}>
-                          {site.status}
-                        </span>
-                        <span className="text-xs text-gray-500">{site.updated}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ==================== SETTINGS ==================== */}
+          {/* SETTINGS */}
           {active === "settings" && (
             <div>
               <h1 className="text-2xl font-semibold mb-6">Settings</h1>
@@ -562,7 +653,11 @@ authMode === "signup" ? "bg-violet-600" : "bg-gray-800"}`}
                 </div>
                 <div>
                   <div className="text-gray-400 mb-1">Version</div>
-                  <div>0.1.6</div>
+                  <div>0.4.0</div>
+                </div>
+                <div>
+                  <div className="text-gray-400 mb-1">Storage</div>
+                  <div>Naijacloud (Port Harcourt, Nigeria)</div>
                 </div>
               </div>
             </div>
