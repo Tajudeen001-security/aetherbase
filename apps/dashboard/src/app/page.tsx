@@ -3,8 +3,8 @@
 import { useState, useEffect, useRef } from "react";
 import {
   LayoutDashboard, Shield, Database, HardDrive, Radio,
-  Globe, Settings, Menu, Users, Activity, Server, Upload,
-  CheckCircle, Loader2, Code, Plus, Trash2, Copy
+  Globe, Settings, Menu, X, Server, Upload,
+  CheckCircle, Loader2, Code, Plus, Activity
 } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://kotahbase-api.onrender.com";
@@ -22,7 +22,7 @@ const nav = [
 
 export default function DashboardPage() {
   const [active, setActive] = useState("dashboard");
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [health, setHealth] = useState<any>(null);
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
@@ -119,6 +119,11 @@ export default function DashboardPage() {
     if (active === "sql") fetchTables();
     if (active === "domains") fetchDomains();
   }, [active, token]);
+
+  function navigate(id: string) {
+    setActive(id);
+    setSidebarOpen(false); // close sidebar on mobile after click
+  }
 
   // Auth handlers
   async function handleSignup() {
@@ -287,12 +292,30 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="flex h-screen bg-gray-950 text-gray-100">
+    <div className="flex h-screen bg-gray-950 text-gray-100 relative">
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 z-40 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <aside className={`${sidebarOpen ? "w-64" : "w-20"} bg-gray-900 border-r border-gray-800 flex flex-col transition-all`}>
-        <div className="p-5 flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-violet-600 flex items-center justify-center font-bold">K</div>
-          {sidebarOpen && <span className="text-xl font-semibold">KotahBase</span>}
+      <aside className={`
+        fixed md:static inset-y-0 left-0 z-50
+        w-64 bg-gray-900 border-r border-gray-800 flex flex-col
+        transform transition-transform duration-200 ease-in-out
+        ${sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}
+      `}>
+        <div className="p-5 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-violet-600 flex items-center justify-center font-bold">K</div>
+            <span className="text-xl font-semibold">KotahBase</span>
+          </div>
+          <button onClick={() => setSidebarOpen(false)} className="md:hidden text-gray-400 hover:text-white">
+            <X size={20} />
+          </button>
         </div>
 
         <nav className="flex-1 px-3 space-y-1 mt-2 overflow-y-auto">
@@ -302,13 +325,13 @@ export default function DashboardPage() {
             return (
               <button
                 key={item.id}
-                onClick={() => setActive(item.id)}
+                onClick={() => navigate(item.id)}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition ${
                   isActive ? "bg-violet-600/20 text-violet-400" : "text-gray-400 hover:bg-gray-800 hover:text-white"
                 }`}
               >
                 <Icon size={18} />
-                {sidebarOpen && item.name}
+                {item.name}
               </button>
             );
           })}
@@ -331,12 +354,12 @@ export default function DashboardPage() {
       </aside>
 
       {/* Main */}
-      <main className="flex-1 overflow-auto">
-        <header className="h-14 border-b border-gray-800 flex items-center px-6 gap-4">
-          <button onClick={() => setSidebarOpen(!sidebarOpen)} className="text-gray-400 hover:text-white">
-            <Menu size={20} />
+      <main className="flex-1 overflow-auto w-full">
+        <header className="h-14 border-b border-gray-800 flex items-center px-4 md:px-6 gap-3 sticky top-0 bg-gray-950 z-30">
+          <button onClick={() => setSidebarOpen(true)} className="md:hidden text-gray-400 hover:text-white">
+            <Menu size={22} />
           </button>
-          <span className="text-sm text-gray-400">KotahBase Dashboard</span>
+          <span className="text-sm text-gray-400 truncate">KotahBase</span>
           {user && (
             <button onClick={handleLogout} className="ml-auto text-sm text-gray-400 hover:text-white">
               Logout
@@ -344,19 +367,19 @@ export default function DashboardPage() {
           )}
         </header>
 
-        <div className="p-8">
+        <div className="p-4 md:p-8">
           {/* DASHBOARD */}
           {active === "dashboard" && (
             <div>
-              <h1 className="text-2xl font-semibold mb-6">Overview</h1>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
-                <Card title="API Status" value={health?.status === "healthy" ? "Online" : "Offline"} icon={<Server size={18} />} />
-                <Card title="Database" value={health?.database === "connected" ? "Connected" : "—"} icon={<Database size={18} />} />
-                <Card title="Storage" value={health?.storage === "connected" ? "Naijacloud" : "—"} icon={<HardDrive size={18} />} />
-                <Card title="Version" value={health?.version || "—"} icon={<Activity size={18} />} />
+              <h1 className="text-xl md:text-2xl font-semibold mb-4 md:mb-6">Overview</h1>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-5 mb-6 md:mb-8">
+                <Card title="API Status" value={health?.status === "healthy" ? "Online" : "Offline"} icon={<Server size={16} />} />
+                <Card title="Database" value={health?.database === "connected" ? "Connected" : "—"} icon={<Database size={16} />} />
+                <Card title="Storage" value={health?.storage === "connected" ? "Naijacloud" : "—"} icon={<HardDrive size={16} />} />
+                <Card title="Version" value={health?.version || "—"} icon={<Activity size={16} />} />
               </div>
-              <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-                <h2 className="font-medium mb-4">System Status</h2>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 md:p-6">
+                <h2 className="font-medium mb-3 text-sm md:text-base">System Status</h2>
                 <pre className="text-xs text-gray-400 overflow-auto">{JSON.stringify(health, null, 2)}</pre>
               </div>
             </div>
@@ -365,26 +388,26 @@ export default function DashboardPage() {
           {/* AUTH */}
           {active === "auth" && (
             <div>
-              <h1 className="text-2xl font-semibold mb-2">Authentication</h1>
-              <p className="text-gray-400 mb-6">Email + Password + 6-digit code</p>
+              <h1 className="text-xl md:text-2xl font-semibold mb-2">Authentication</h1>
+              <p className="text-gray-400 mb-4 md:mb-6 text-sm">Email + Password + 6-digit code</p>
 
               {user ? (
-                <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 max-w-md">
+                <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 md:p-6 max-w-md">
                   <div className="flex items-center gap-2 text-green-400 mb-4">
                     <CheckCircle size={20} />
                     <span className="font-medium">Logged in</span>
                   </div>
                   <div className="space-y-2 text-sm">
                     <div><span className="text-gray-400">Email:</span> {user.email}</div>
-                    <div><span className="text-gray-400">User ID:</span> <span className="font-mono text-xs">{user.id}</span></div>
+                    <div className="break-all"><span className="text-gray-400">User ID:</span> <span className="font-mono text-xs">{user.id}</span></div>
                   </div>
                   <button onClick={handleLogout} className="mt-6 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm">Logout</button>
                 </div>
               ) : (
-                <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 max-w-md">
-                  <div className="flex gap-2 mb-6">
-                    <button onClick={() => { setAuthMode("login"); setAuthMsg(""); }} className={`px-4 py-2 rounded-lg text-sm ${authMode === "login" ? "bg-violet-600" : "bg-gray-800"}`}>Login</button>
-                    <button onClick={() => { setAuthMode("signup"); setAuthMsg(""); }} className={`px-4 py-2 rounded-lg text-sm ${authMode === "signup" ? "bg-violet-600" : "bg-gray-800"}`}>Sign Up</button>
+                <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 md:p-6 max-w-md">
+                  <div className="flex gap-2 mb-5">
+                    <button onClick={() => { setAuthMode("login"); setAuthMsg(""); }} className={`flex-1 px-3 py-2 rounded-lg text-sm ${authMode === "login" ? "bg-violet-600" : "bg-gray-800"}`}>Login</button>
+                    <button onClick={() => { setAuthMode("signup"); setAuthMsg(""); }} className={`flex-1 px-3 py-2 rounded-lg text-sm ${authMode === "signup" ? "bg-violet-600" : "bg-gray-800"}`}>Sign Up</button>
                   </div>
 
                   {authMode !== "verify" && (
@@ -420,32 +443,34 @@ export default function DashboardPage() {
           {/* DATABASE */}
           {active === "database" && (
             <div>
-              <div className="flex items-center justify-between mb-6">
-                <h1 className="text-2xl font-semibold">Database</h1>
-                <button onClick={fetchScores} className="px-4 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm">Refresh</button>
+              <div className="flex items-center justify-between mb-4 md:mb-6">
+                <h1 className="text-xl md:text-2xl font-semibold">Database</h1>
+                <button onClick={fetchScores} className="px-3 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm">Refresh</button>
               </div>
               <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                <div className="px-5 py-3 border-b border-gray-800 text-sm text-gray-400">Table: <span className="text-violet-400">game_scores</span></div>
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-800/50 text-gray-400">
-                    <tr>
-                      <th className="text-left px-5 py-3">Player</th>
-                      <th className="text-left px-5 py-3">Score</th>
-                      <th className="text-left px-5 py-3">ID</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {scores.length === 0 ? (
-                      <tr><td colSpan={3} className="px-5 py-8 text-center text-gray-500">No data yet</td></tr>
-                    ) : scores.map((row) => (
-                      <tr key={row.id} className="border-t border-gray-800">
-                        <td className="px-5 py-3">{row.player_name}</td>
-                        <td className="px-5 py-3">{row.score}</td>
-                        <td className="px-5 py-3 text-gray-500 font-mono text-xs">{row.id?.slice(0, 8)}…</td>
+                <div className="px-4 py-3 border-b border-gray-800 text-sm text-gray-400">Table: <span className="text-violet-400">game_scores</span></div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-800/50 text-gray-400">
+                      <tr>
+                        <th className="text-left px-4 py-3">Player</th>
+                        <th className="text-left px-4 py-3">Score</th>
+                        <th className="text-left px-4 py-3 hidden sm:table-cell">ID</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {scores.length === 0 ? (
+                        <tr><td colSpan={3} className="px-4 py-8 text-center text-gray-500">No data yet</td></tr>
+                      ) : scores.map((row) => (
+                        <tr key={row.id} className="border-t border-gray-800">
+                          <td className="px-4 py-3">{row.player_name}</td>
+                          <td className="px-4 py-3">{row.score}</td>
+                          <td className="px-4 py-3 text-gray-500 font-mono text-xs hidden sm:table-cell">{row.id?.slice(0, 8)}…</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}
@@ -453,24 +478,24 @@ export default function DashboardPage() {
           {/* SQL EDITOR */}
           {active === "sql" && (
             <div>
-              <h1 className="text-2xl font-semibold mb-2">SQL Editor</h1>
-              <p className="text-gray-400 mb-6">Run SQL queries against your database</p>
+              <h1 className="text-xl md:text-2xl font-semibold mb-2">SQL Editor</h1>
+              <p className="text-gray-400 mb-4 text-sm">Run SQL queries against your database</p>
 
-              {!token && <p className="text-yellow-400 text-sm mb-4">Please login first to use the SQL Editor</p>}
+              {!token && <p className="text-yellow-400 text-sm mb-4">Please login first</p>}
 
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-                <div className="lg:col-span-1">
-                  <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-                    <h3 className="text-sm font-medium mb-3 text-gray-400">Tables</h3>
+              <div className="flex flex-col lg:flex-row gap-4">
+                <div className="lg:w-48 flex-shrink-0">
+                  <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
+                    <h3 className="text-xs font-medium mb-2 text-gray-400">Tables</h3>
                     {tables.length === 0 ? (
-                      <p className="text-xs text-gray-500">No tables or not logged in</p>
+                      <p className="text-xs text-gray-500">No tables</p>
                     ) : (
                       <div className="space-y-1">
                         {tables.map(t => (
                           <button
                             key={t}
                             onClick={() => setSqlQuery(`SELECT * FROM ${t} LIMIT 20;`)}
-                            className="w-full text-left text-sm px-2 py-1.5 rounded hover:bg-gray-800 text-violet-400 font-mono"
+                            className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-gray-800 text-violet-400 font-mono"
                           >
                             {t}
                           </button>
@@ -480,19 +505,19 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                <div className="lg:col-span-3 space-y-4">
+                <div className="flex-1 space-y-3">
                   <textarea
                     value={sqlQuery}
                     onChange={e => setSqlQuery(e.target.value)}
-                    rows={6}
-                    className="w-full bg-gray-900 border border-gray-800 rounded-xl p-4 font-mono text-sm focus:outline-none focus:border-violet-500 resize-y"
+                    rows={5}
+                    className="w-full bg-gray-900 border border-gray-800 rounded-xl p-3 font-mono text-sm focus:outline-none focus:border-violet-500 resize-y"
                     placeholder="SELECT * FROM game_scores;"
                   />
 
                   <button
                     onClick={runSQL}
                     disabled={sqlLoading || !token}
-                    className="px-5 py-2.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium flex items-center gap-2 disabled:opacity-40"
+                    className="px-4 py-2.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium flex items-center gap-2 disabled:opacity-40"
                   >
                     {sqlLoading && <Loader2 size={16} className="animate-spin" />}
                     Run Query
@@ -504,16 +529,14 @@ export default function DashboardPage() {
                         <div className="p-4 text-red-400 text-sm">{sqlResult.error}</div>
                       ) : (
                         <>
-                          <div className="px-4 py-2 border-b border-gray-800 text-xs text-gray-400">
-                            {sqlResult.rowCount} row(s)
-                          </div>
+                          <div className="px-4 py-2 border-b border-gray-800 text-xs text-gray-400">{sqlResult.rowCount} row(s)</div>
                           {sqlResult.rows && sqlResult.rows.length > 0 ? (
                             <div className="overflow-x-auto">
                               <table className="w-full text-sm">
                                 <thead className="bg-gray-800/50 text-gray-400">
                                   <tr>
                                     {sqlResult.fields?.map((f: string) => (
-                                      <th key={f} className="text-left px-4 py-2 font-mono text-xs">{f}</th>
+                                      <th key={f} className="text-left px-3 py-2 font-mono text-xs whitespace-nowrap">{f}</th>
                                     ))}
                                   </tr>
                                 </thead>
@@ -521,9 +544,7 @@ export default function DashboardPage() {
                                   {sqlResult.rows.map((row: any, i: number) => (
                                     <tr key={i} className="border-t border-gray-800">
                                       {sqlResult.fields?.map((f: string) => (
-                                        <td key={f} className="px-4 py-2 font-mono text-xs max-w-xs truncate">
-                                          {String(row[f] ?? "")}
-                                        </td>
+                                        <td key={f} className="px-3 py-2 font-mono text-xs max-w-[150px] truncate">{String(row[f] ?? "")}</td>
                                       ))}
                                     </tr>
                                   ))}
@@ -545,24 +566,24 @@ export default function DashboardPage() {
           {/* STORAGE */}
           {active === "storage" && (
             <div>
-              <h1 className="text-2xl font-semibold mb-6">Storage</h1>
-              <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-6">
-                <h3 className="font-medium mb-4 flex items-center gap-2"><Upload size={18} /> Upload File</h3>
-                {!token && <p className="text-yellow-400 text-sm mb-4">You need to login first</p>}
+              <h1 className="text-xl md:text-2xl font-semibold mb-4 md:mb-6">Storage</h1>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-4">
+                <h3 className="font-medium mb-3 flex items-center gap-2 text-sm"><Upload size={16} /> Upload File</h3>
+                {!token && <p className="text-yellow-400 text-sm mb-3">You need to login first</p>}
                 <input ref={fileRef} type="file" onChange={handleUpload} className="hidden" />
-                <button onClick={() => fileRef.current?.click()} disabled={!token} className="px-5 py-2.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium disabled:opacity-40">
+                <button onClick={() => fileRef.current?.click()} disabled={!token} className="px-4 py-2.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium disabled:opacity-40">
                   Choose File & Upload
                 </button>
                 {uploadStatus && <p className={`mt-3 text-sm ${uploadStatus.includes("success") ? "text-green-400" : "text-red-400"}`}>{uploadStatus}</p>}
               </div>
               {uploadedFiles.length > 0 && (
                 <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                  <div className="px-5 py-3 border-b border-gray-800 text-sm text-gray-400">Uploaded Files</div>
+                  <div className="px-4 py-3 border-b border-gray-800 text-sm text-gray-400">Uploaded Files</div>
                   <div className="divide-y divide-gray-800">
                     {uploadedFiles.map((f, i) => (
-                      <div key={i} className="px-5 py-3 flex items-center justify-between text-sm">
-                        <span>{f.name}</span>
-                        <span className="text-gray-500">{(f.size / 1024).toFixed(1)} KB</span>
+                      <div key={i} className="px-4 py-3 flex items-center justify-between text-sm gap-2">
+                        <span className="truncate">{f.name}</span>
+                        <span className="text-gray-500 flex-shrink-0">{(f.size / 1024).toFixed(1)} KB</span>
                       </div>
                     ))}
                   </div>
@@ -574,10 +595,10 @@ export default function DashboardPage() {
           {/* REALTIME */}
           {active === "realtime" && (
             <div>
-              <h1 className="text-2xl font-semibold mb-6">Realtime</h1>
-              <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-                <p className="text-gray-400">Realtime WebSocket will be re-enabled in a more stable version soon.</p>
-                <p className="text-sm text-gray-500 mt-2">Endpoint: /realtime/v1</p>
+              <h1 className="text-xl md:text-2xl font-semibold mb-4">Realtime</h1>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+                <p className="text-gray-400 text-sm">Realtime WebSocket will be re-enabled in a more stable version soon.</p>
+                <p className="text-xs text-gray-500 mt-2">Endpoint: /realtime/v1</p>
               </div>
             </div>
           )}
@@ -585,14 +606,14 @@ export default function DashboardPage() {
           {/* DOMAINS */}
           {active === "domains" && (
             <div>
-              <h1 className="text-2xl font-semibold mb-2">Custom Domains</h1>
-              <p className="text-gray-400 mb-6">Connect your own domain to KotahBase</p>
+              <h1 className="text-xl md:text-2xl font-semibold mb-2">Custom Domains</h1>
+              <p className="text-gray-400 mb-4 text-sm">Connect your own domain</p>
 
               {!token && <p className="text-yellow-400 text-sm mb-4">Please login first</p>}
 
-              <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-6">
-                <h3 className="font-medium mb-4 flex items-center gap-2"><Plus size={18} /> Add Domain</h3>
-                <div className="flex gap-3">
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 md:p-5 mb-4">
+                <h3 className="font-medium mb-3 flex items-center gap-2 text-sm"><Plus size={16} /> Add Domain</h3>
+                <div className="flex flex-col sm:flex-row gap-2">
                   <input
                     type="text"
                     placeholder="example.com"
@@ -600,35 +621,37 @@ export default function DashboardPage() {
                     onChange={e => setNewDomain(e.target.value)}
                     className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-violet-500"
                   />
-                  <button onClick={addDomain} disabled={!token} className="px-5 py-2.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium disabled:opacity-40">
+                  <button onClick={addDomain} disabled={!token} className="px-4 py-2.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium disabled:opacity-40">
                     Add Domain
                   </button>
                 </div>
-                {domainMsg && <p className="mt-3 text-sm text-yellow-400">{domainMsg}</p>}
+                {domainMsg && <p className="mt-3 text-sm text-yellow-400 break-all">{domainMsg}</p>}
               </div>
 
               <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                <div className="px-5 py-3 border-b border-gray-800 text-sm text-gray-400">Your Domains</div>
+                <div className="px-4 py-3 border-b border-gray-800 text-sm text-gray-400">Your Domains</div>
                 {domains.length === 0 ? (
-                  <div className="px-5 py-8 text-center text-gray-500 text-sm">No domains yet</div>
+                  <div className="px-4 py-8 text-center text-gray-500 text-sm">No domains yet</div>
                 ) : (
                   <div className="divide-y divide-gray-800">
                     {domains.map((d) => (
-                      <div key={d.id} className="px-5 py-4 flex items-center justify-between">
-                        <div>
-                          <div className="font-medium">{d.domain}</div>
-                          <div className="text-xs text-gray-500 mt-1">
-                            Status: <span className={d.status === "verified" ? "text-green-400" : "text-yellow-400"}>{d.status}</span>
+                      <div key={d.id} className="px-4 py-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="font-medium truncate">{d.domain}</div>
+                            <div className="text-xs text-gray-500 mt-1">
+                              Status: <span className={d.status === "verified" ? "text-green-400" : "text-yellow-400"}>{d.status}</span>
+                            </div>
                             {d.verification_token && d.status === "pending" && (
-                              <span className="ml-3 font-mono">TXT: {d.verification_token}</span>
+                              <div className="text-xs font-mono text-gray-500 mt-1 break-all">TXT: {d.verification_token}</div>
                             )}
                           </div>
-                        </div>
-                        <div className="flex gap-2">
-                          {d.status === "pending" && (
-                            <button onClick={() => verifyDomain(d.id)} className="px-3 py-1.5 bg-green-600/20 text-green-400 rounded text-xs">Verify</button>
-                          )}
-                          <button onClick={() => deleteDomain(d.id)} className="px-3 py-1.5 bg-red-600/20 text-red-400 rounded text-xs">Delete</button>
+                          <div className="flex gap-2 flex-shrink-0">
+                            {d.status === "pending" && (
+                              <button onClick={() => verifyDomain(d.id)} className="px-2.5 py-1 bg-green-600/20 text-green-400 rounded text-xs">Verify</button>
+                            )}
+                            <button onClick={() => deleteDomain(d.id)} className="px-2.5 py-1 bg-red-600/20 text-red-400 rounded text-xs">Delete</button>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -641,11 +664,11 @@ export default function DashboardPage() {
           {/* SETTINGS */}
           {active === "settings" && (
             <div>
-              <h1 className="text-2xl font-semibold mb-6">Settings</h1>
-              <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 max-w-xl space-y-4 text-sm">
+              <h1 className="text-xl md:text-2xl font-semibold mb-4 md:mb-6">Settings</h1>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 max-w-xl space-y-4 text-sm">
                 <div>
                   <div className="text-gray-400 mb-1">API URL</div>
-                  <div className="font-mono bg-gray-800 px-3 py-2 rounded">{API_URL}</div>
+                  <div className="font-mono bg-gray-800 px-3 py-2 rounded text-xs break-all">{API_URL}</div>
                 </div>
                 <div>
                   <div className="text-gray-400 mb-1">Logged in as</div>
@@ -670,12 +693,12 @@ export default function DashboardPage() {
 
 function Card({ title, value, icon }: { title: string; value: any; icon?: React.ReactNode }) {
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
-      <div className="flex items-center justify-between text-sm text-gray-400 mb-2">
-        <span>{title}</span>
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 md:p-5">
+      <div className="flex items-center justify-between text-xs md:text-sm text-gray-400 mb-1 md:mb-2">
+        <span className="truncate">{title}</span>
         {icon}
       </div>
-      <div className="text-2xl font-semibold">{value}</div>
+      <div className="text-lg md:text-2xl font-semibold truncate">{value}</div>
     </div>
   );
 }
