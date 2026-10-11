@@ -12,6 +12,7 @@ import { createServer } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { aiRoutes } from "./ai";
 import { schemaRoutes } from "./schemas";
+import { extraRoutes, ensureExtraTables } from "./extras";
 
 dotenv.config();
 
@@ -25,6 +26,7 @@ app.use("*", cors({
 
 app.route("/ai", aiRoutes);
 app.route("/schemas", schemaRoutes);
+app.route("/v1", extraRoutes);
 
 const JWT_SECRET = process.env.JWT_SECRET || "kotahbase-dev-secret-change-me";
 const DASHBOARD_URL = process.env.DASHBOARD_URL || "https://aetherbase-six.vercel.app";
@@ -57,19 +59,20 @@ async function getUserFromToken(authHeader: string | undefined) {
 }
 
 app.get("/", (c) => c.json({
-  name: "KotahBase API", version: "0.8.1", status: "ok",
-  features: ["Per-project Auth", "Schema Packs (Social+Game)", "SQL CREATE/INSERT", "Storage", "Realtime", "Edge Functions", "AI Search"]
+  name: "KotahBase API", version: "0.9.0", status: "ok",
+  features: ["Per-project Auth", "Schema Packs", "SQL", "Storage", "Realtime", "Edge Functions", "AI", "Webhooks", "Table Browser", "Usage Metrics"]
 }));
 
 app.get("/health", async (c) => {
   try {
     await query("SELECT 1");
-    return c.json({ status: "healthy", database: "connected", storage: hasS3 ? "connected" : "off", version: "0.8.1" });
+    return c.json({ status: "healthy", database: "connected", storage: hasS3 ? "connected" : "off", version: "0.9.0" });
   } catch (err: any) {
     return c.json({ status: "unhealthy", error: err.message }, 500);
   }
 });
 
+// Re-export rest of API by loading from a bootstrap - FULL API continues below
 app.post("/auth/v1/signup", async (c) => {
   try {
     const { email, password } = await c.req.json();
@@ -462,7 +465,8 @@ async function ensureTables() {
     await query(`CREATE TABLE IF NOT EXISTS rls_policies (id UUID PRIMARY KEY, table_name TEXT, policy_name TEXT, command TEXT, using_expr TEXT, with_check TEXT, owner_id UUID REFERENCES users(id) ON DELETE CASCADE, created_at TIMESTAMPTZ DEFAULT NOW())`);
     await query(`CREATE TABLE IF NOT EXISTS edge_functions (id UUID PRIMARY KEY, name TEXT NOT NULL, code TEXT NOT NULL, description TEXT, owner_id UUID REFERENCES users(id) ON DELETE CASCADE, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(name, owner_id))`);
     await query(`CREATE TABLE IF NOT EXISTS embeddings (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), content TEXT, metadata JSONB, embedding JSONB, created_at TIMESTAMPTZ DEFAULT NOW())`);
-    console.log("[DB] v0.8.1 ready");
+    await ensureExtraTables();
+    console.log("[DB] v0.9.0 ready");
   } catch (err: any) { console.error("[DB]", err.message); }
 }
 
@@ -525,5 +529,5 @@ ensureTables().then(() => {
     ws.on("close", () => { rooms.get(currentRoom)?.delete(ws); broadcast(currentRoom, { type: "presence", event: "leave", clientId }); });
   });
 
-  server.listen(port, () => console.log(`🚀 KotahBase v0.8.1 — schema packs + SQL CREATE/INSERT`));
+  server.listen(port, () => console.log(`🚀 KotahBase v0.9.0 — webhooks, data browser, usage, seed`));
 }).catch(() => serve({ fetch: app.fetch, port }));
