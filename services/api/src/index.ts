@@ -6,6 +6,7 @@ import jwt from "jsonwebtoken";
 import { v4 as uuidv4 } from "uuid";
 import { query } from "./db/client";
 import { uploadFile, listFiles, deleteFile, hasS3 } from "./storage";
+import { sendOTPEmail } from "./email";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -21,25 +22,20 @@ app.use("*", cors({
 const JWT_SECRET = process.env.JWT_SECRET || "kotahbase-dev-secret-change-me";
 
 const rateLimitMap = new Map<string, { count: number; reset: number }>();
-const RATE_LIMIT = 120;
-const RATE_WINDOW = 60 * 1000;
-
 app.use("*", async (c, next) => {
   const ip = c.req.header("x-forwarded-for") || "unknown";
   const now = Date.now();
   const entry = rateLimitMap.get(ip);
   if (!entry || now > entry.reset) {
-    rateLimitMap.set(ip, { count: 1, reset: now + RATE_WINDOW });
+    rateLimitMap.set(ip, { count: 1, reset: now + 60000 });
   } else {
     entry.count++;
-    if (entry.count > RATE_LIMIT) {
-      return c.json({ error: "Too many requests" }, 429);
-    }
+    if (entry.count > 120) return c.json({ error: "Too many requests" }, 429);
   }
   await next();
 });
 
-function generateOTP(): string {
+function generateOTP() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
@@ -59,40 +55,18 @@ async function getUserFromToken(authHeader: string | undefined) {
   }
 }
 
-// ====================== ROOT ======================
-app.get("/", (c) => {
-  return c.json({
-    name: "KotahBase API",
-    version: "0.3.0",
-    status: "ok",
-    message: "KotahBase — Backend for apps, websites & games",
-    features: [
-      "Auth (Email + Password + 6-digit code)",
-      "Projects",
-      "Database REST",
-      "File Storage (Naijacloud - Port Harcourt)",
-      "Usage Stats",
-      "Rate Limiting"
-    ],
-    storage: hasS3 ? "Naijacloud (af-west)" : "Not configured",
-    limits: {
-      plan: "free",
-      ram: "512MB (Render free tier)",
-      storage: "5GB free on Naijacloud"
-    }
-  });
-});
+app.get("/", (c) => c.json({
+  name: "KotahBase API",
+  version: "0.3.1",
+  status: "ok",
+  features: ["Auth + Email OTP", "Projects", "Database", "File Storage (Naijacloud)", "Stats"],
+  storage: hasS3 ? "Naijacloud (Port Harcourt)" : "Not configured"
+}));
 
 app.get("/health", async (c) => {
   try {
     await query("SELECT 1");
-    return c.json({
-      status: "healthy",
-      database: "connected",
-      storage: hasS3 ? "connected" : "not configured",
-      version: "0.3.0",
-      timestamp: new Date().toISOString()
-    });
+    return c.json({ status: "healthy", database: "connected", storage: hasS3 ? "connected" : "off", version: "0.3.1" });
   } catch (err: any) {
     return c.json({ status: "unhealthy", error: err.message }, 500);
   }
@@ -102,35 +76,21 @@ app.get("/stats", async (c) => {
   try {
     const users = await query("SELECT COUNT(*) FROM users");
     const projects = await query("SELECT COUNT(*) FROM projects");
-    const scores = await query("SELECT COUNT(*) FROM game_scores");
     return c.json({
       users: Number(users.rows[0].count),
       projects: Number(projects.rows[0].count),
-      game_scores: Number(scores.rows[0].count),
-      storage: hasS3 ? "Naijacloud" : "none",
-      plan: "free"
+      storage: hasS3 ? "Naijacloud" : "none"
     });
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
   }
 });
 
-app.get("/limits", (c) => {
-  return c.json({
-    plan: "free",
-    ram: "512 MB",
-    storage: "5 GB (Naijacloud Port Harcourt)",
-    max_concurrent_users: "~30-50",
-    data_residency: "Nigeria (Port Harcourt)",
-    sleep_after: "15 minutes of inactivity"
-  });
-});
-
-// ====================== AUTH ======================
+// AUTH
 app.post("/auth/v1/signup", async (c) => {
   try {
     const { email, password } = await c.req.json();
-    if (!email || !password) return c.json({ error: "Email and password are required" }, 400);
+    if (!email || !password) return c.json({ error: "Email and password required" }, 400);
     if (password.length < 8) return c.json({ error: "Password must be at least 8 characters" }, 400);
 
     const existing = await query("SELECT id FROM users WHERE email = $1", [email.toLowerCase()]);
@@ -138,24 +98,20 @@ app.post("/auth/v1/signup", async (c) => {
 
     const hashed = await bcrypt.hash(password, 10);
     const id = uuidv4();
-
-    await query(
-      "INSERT INTO users (id, email, password, email_confirmed) VALUES ($1, $2, $3, false)",
-      [id, email.toLowerCase(), hashed]
-    );
+    await query("INSERT INTO users (id, email, password, email_confirmed) VALUES ($1, $2, $3, false)", [id, email.toLowerCase(), hashed]);
 
     const code = generateOTP();
     await query(
-      `INSERT INTO otp_codes (email, code, expires_at, type)
-       VALUES ($1, $2, NOW() + INTERVAL '10 minutes', 'signup')
+      `INSERT INTO otp_codes (email, code, expires_at, type) VALUES ($1, $2, NOW() + INTERVAL '10 minutes', 'signup')
        ON CONFLICT (email) DO UPDATE SET code = $2, expires_at = NOW() + INTERVAL '10 minutes'`,
       [email.toLowerCase(), code]
     );
 
-    console.log(`[AUTH] OTP for ${email}: ${code}`);
+    const sent = await sendOTPEmail(email, code);
+    console.log(`[AUTH] OTP for ${email}: ${code} | Email sent: ${sent}`);
 
     return c.json({
-      message: "Account created. 6-digit code sent.",
+      message: "Account created. Check your email for the 6-digit code.",
       dev_code: code
     });
   } catch (err: any) {
@@ -188,7 +144,6 @@ app.post("/auth/v1/verify", async (c) => {
 
     return c.json({ access_token: token, token_type: "bearer", expires_in: 604800, user });
   } catch (err: any) {
-    console.error("[AUTH] Verify error:", err.message);
     return c.json({ error: "Verification failed" }, 500);
   }
 });
@@ -214,7 +169,6 @@ app.post("/auth/v1/login", async (c) => {
       user: { id: user.id, email: user.email, created_at: user.created_at }
     });
   } catch (err: any) {
-    console.error("[AUTH] Login error:", err.message);
     return c.json({ error: "Login failed" }, 500);
   }
 });
@@ -225,7 +179,7 @@ app.get("/auth/v1/user", async (c) => {
   return c.json(user);
 });
 
-// ====================== PROJECTS ======================
+// PROJECTS
 app.post("/projects", async (c) => {
   try {
     const user = await getUserFromToken(c.req.header("Authorization"));
@@ -241,14 +195,9 @@ app.post("/projects", async (c) => {
     const id = uuidv4();
     const apiKey = `kb_${uuidv4().replace(/-/g, "")}`;
 
-    await query(
-      "INSERT INTO projects (id, name, password, owner_id, api_key) VALUES ($1, $2, $3, $4, $5)",
-      [id, name, hashed, user.id, apiKey]
-    );
-
+    await query("INSERT INTO projects (id, name, password, owner_id, api_key) VALUES ($1, $2, $3, $4, $5)", [id, name, hashed, user.id, apiKey]);
     return c.json({ id, name, api_key: apiKey, created_at: new Date().toISOString() });
   } catch (err: any) {
-    console.error("[PROJECTS] error:", err.message);
     return c.json({ error: "Failed to create project" }, 500);
   }
 });
@@ -256,33 +205,20 @@ app.post("/projects", async (c) => {
 app.get("/projects", async (c) => {
   const user = await getUserFromToken(c.req.header("Authorization"));
   if (!user) return c.json({ error: "Not authenticated" }, 401);
-
-  const res = await query(
-    "SELECT id, name, api_key, created_at FROM projects WHERE owner_id = $1 ORDER BY created_at DESC",
-    [user.id]
-  );
+  const res = await query("SELECT id, name, api_key, created_at FROM projects WHERE owner_id = $1 ORDER BY created_at DESC", [user.id]);
   return c.json(res.rows);
 });
 
 app.delete("/projects/:id", async (c) => {
-  try {
-    const user = await getUserFromToken(c.req.header("Authorization"));
-    if (!user) return c.json({ error: "Not authenticated" }, 401);
-
-    const id = c.req.param("id");
-    const res = await query(
-      "DELETE FROM projects WHERE id = $1 AND owner_id = $2 RETURNING id",
-      [id, user.id]
-    );
-
-    if (res.rows.length === 0) return c.json({ error: "Project not found" }, 404);
-    return c.json({ message: "Project deleted" });
-  } catch (err: any) {
-    return c.json({ error: err.message }, 500);
-  }
+  const user = await getUserFromToken(c.req.header("Authorization"));
+  if (!user) return c.json({ error: "Not authenticated" }, 401);
+  const id = c.req.param("id");
+  const res = await query("DELETE FROM projects WHERE id = $1 AND owner_id = $2 RETURNING id", [id, user.id]);
+  if (res.rows.length === 0) return c.json({ error: "Project not found" }, 404);
+  return c.json({ message: "Project deleted" });
 });
 
-// ====================== DATABASE ======================
+// DATABASE
 app.get("/rest/v1/:table", async (c) => {
   try {
     const table = c.req.param("table");
@@ -298,13 +234,9 @@ app.post("/rest/v1/:table", async (c) => {
   try {
     const table = c.req.param("table");
     const body = await c.req.json();
-
     if (table === "game_scores") {
       const id = uuidv4();
-      await query(
-        "INSERT INTO game_scores (id, player_name, score) VALUES ($1, $2, $3)",
-        [id, body.player_name || "Anonymous", body.score || 0]
-      );
+      await query("INSERT INTO game_scores (id, player_name, score) VALUES ($1, $2, $3)", [id, body.player_name || "Anonymous", body.score || 0]);
       return c.json({ id, ...body }, 201);
     }
     return c.json({ error: "Not supported" }, 400);
@@ -313,20 +245,16 @@ app.post("/rest/v1/:table", async (c) => {
   }
 });
 
-// ====================== STORAGE (Naijacloud) ======================
+// STORAGE
 app.post("/storage/v1/object/:bucket/:key", async (c) => {
   try {
     if (!hasS3) return c.json({ error: "Storage not configured" }, 503);
-
     const key = c.req.param("key");
     const contentType = c.req.header("content-type") || "application/octet-stream";
     const body = await c.req.arrayBuffer();
-    const buffer = Buffer.from(body);
-
-    const result = await uploadFile(key, buffer, contentType);
+    const result = await uploadFile(key, Buffer.from(body), contentType);
     return c.json(result, 201);
   } catch (err: any) {
-    console.error("[Storage] Upload error:", err.message);
     return c.json({ error: err.message }, 500);
   }
 });
@@ -334,8 +262,7 @@ app.post("/storage/v1/object/:bucket/:key", async (c) => {
 app.get("/storage/v1/list", async (c) => {
   try {
     if (!hasS3) return c.json({ error: "Storage not configured" }, 503);
-    const files = await listFiles();
-    return c.json(files);
+    return c.json(await listFiles());
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
   }
@@ -344,69 +271,30 @@ app.get("/storage/v1/list", async (c) => {
 app.delete("/storage/v1/object/:key", async (c) => {
   try {
     if (!hasS3) return c.json({ error: "Storage not configured" }, 503);
-    const key = c.req.param("key");
-    await deleteFile(key);
-    return c.json({ message: "Deleted", key });
+    await deleteFile(c.req.param("key"));
+    return c.json({ message: "Deleted" });
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
   }
 });
 
-// ====================== ENSURE TABLES ======================
 async function ensureTables() {
   try {
-    await query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id UUID PRIMARY KEY,
-        email TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        email_confirmed BOOLEAN DEFAULT false,
-        created_at TIMESTAMPTZ DEFAULT NOW()
-      )
-    `);
-    await query(`
-      CREATE TABLE IF NOT EXISTS projects (
-        id UUID PRIMARY KEY,
-        name TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        owner_id UUID REFERENCES users(id) ON DELETE CASCADE,
-        api_key TEXT UNIQUE NOT NULL,
-        created_at TIMESTAMPTZ DEFAULT NOW()
-      )
-    `);
-    await query(`
-      CREATE TABLE IF NOT EXISTS otp_codes (
-        email TEXT PRIMARY KEY,
-        code TEXT NOT NULL,
-        expires_at TIMESTAMPTZ NOT NULL,
-        type TEXT NOT NULL
-      )
-    `);
-    await query(`
-      CREATE TABLE IF NOT EXISTS game_scores (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        player_name TEXT NOT NULL,
-        score INTEGER NOT NULL DEFAULT 0,
-        created_at TIMESTAMPTZ DEFAULT NOW()
-      )
-    `);
+    await query(`CREATE TABLE IF NOT EXISTS users (id UUID PRIMARY KEY, email TEXT UNIQUE NOT NULL, password TEXT NOT NULL, email_confirmed BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW())`);
+    await query(`CREATE TABLE IF NOT EXISTS projects (id UUID PRIMARY KEY, name TEXT UNIQUE NOT NULL, password TEXT NOT NULL, owner_id UUID REFERENCES users(id) ON DELETE CASCADE, api_key TEXT UNIQUE NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW())`);
+    await query(`CREATE TABLE IF NOT EXISTS otp_codes (email TEXT PRIMARY KEY, code TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL, type TEXT NOT NULL)`);
+    await query(`CREATE TABLE IF NOT EXISTS game_scores (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), player_name TEXT NOT NULL, score INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`);
     console.log("[DB] Tables ready");
   } catch (err: any) {
     console.error("[DB] Error:", err.message);
   }
 }
 
-// ====================== START ======================
 const port = Number(process.env.PORT) || 4000;
-
-console.log("Starting KotahBase v0.3.0...");
-console.log("Storage: Naijacloud (Port Harcourt)");
+console.log("Starting KotahBase v0.3.1...");
 
 ensureTables().then(() => {
   serve({ fetch: app.fetch, port }, (info) => {
-    console.log(`\n🚀 KotahBase running on port ${info.port}`);
-    console.log("   Storage → Naijacloud af-west\n");
+    console.log(`🚀 KotahBase running on port ${info.port}`);
   });
-}).catch(() => {
-  serve({ fetch: app.fetch, port });
-});
+}).catch(() => serve({ fetch: app.fetch, port }));
