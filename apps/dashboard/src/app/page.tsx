@@ -3,20 +3,22 @@
 import { useState, useEffect, useRef } from "react";
 import {
   LayoutDashboard, Shield, Database, HardDrive, Radio,
-  Globe, Settings, Menu, X, Server, Upload,
-  CheckCircle, Loader2, Code, Plus, Activity, Users, ScrollText, Key
+  Globe, Settings, Menu, X, Server, Upload, Key,
+  CheckCircle, Loader2, Code, Plus, Activity, Users,
+  ScrollText, Table, Zap, Lock
 } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://kotahbase-api.onrender.com";
 
 const nav = [
   { name: "Dashboard", icon: LayoutDashboard, id: "dashboard" },
-  { name: "Auth Providers", icon: Shield, id: "auth-providers" },
+  { name: "Projects", icon: Key, id: "projects" },
   { name: "Users", icon: Users, id: "users" },
-  { name: "API Keys", icon: Key, id: "projects" },
-  { name: "Database", icon: Database, id: "database" },
+  { name: "Tables", icon: Table, id: "tables" },
   { name: "SQL Editor", icon: Code, id: "sql" },
   { name: "Storage", icon: HardDrive, id: "storage" },
+  { name: "Functions", icon: Zap, id: "functions" },
+  { name: "RLS", icon: Lock, id: "rls" },
   { name: "Realtime", icon: Radio, id: "realtime" },
   { name: "Domains", icon: Globe, id: "domains" },
   { name: "Logs", icon: ScrollText, id: "logs" },
@@ -31,7 +33,7 @@ export default function DashboardPage() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // Auth form (for dashboard login gate)
+  // Auth form
   const [authMode, setAuthMode] = useState<"login" | "signup" | "verify" | "forgot" | "reset">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -42,30 +44,60 @@ export default function DashboardPage() {
   const [devCode, setDevCode] = useState("");
 
   // Data
-  const [scores, setScores] = useState<any[]>([]);
-  const [sqlQuery, setSqlQuery] = useState("SELECT * FROM game_scores LIMIT 10;");
-  const [sqlResult, setSqlResult] = useState<any>(null);
-  const [sqlLoading, setSqlLoading] = useState(false);
-  const [tables, setTables] = useState<string[]>([]);
-  const [uploadStatus, setUploadStatus] = useState("");
-  const [uploadedFiles, setUploadedFiles] = useState<any[]>([]);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [domains, setDomains] = useState<any[]>([]);
-  const [newDomain, setNewDomain] = useState("");
-  const [domainMsg, setDomainMsg] = useState("");
-  const [authLogs, setAuthLogs] = useState<any[]>([]);
-  const [apiLogs, setApiLogs] = useState<any[]>([]);
-  const [usersList, setUsersList] = useState<any[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
+  const [selectedProject, setSelectedProject] = useState<any>(null);
   const [projectName, setProjectName] = useState("");
   const [projectPassword, setProjectPassword] = useState("");
   const [projectMsg, setProjectMsg] = useState("");
+  const [authConfig, setAuthConfig] = useState({ google_client_id: "", google_client_secret: "", github_client_id: "", github_client_secret: "", redirect_url: "" });
+  const [authConfigMsg, setAuthConfigMsg] = useState("");
+  const [appUsers, setAppUsers] = useState<any[]>([]);
+
+  const [tables, setTables] = useState<string[]>([]);
+  const [newTableName, setNewTableName] = useState("");
+  const [newColumns, setNewColumns] = useState([{ name: "title", type: "text", nullable: true }]);
+  const [tableMsg, setTableMsg] = useState("");
+
+  const [sqlQuery, setSqlQuery] = useState("SELECT * FROM game_scores LIMIT 10;");
+  const [sqlResult, setSqlResult] = useState<any>(null);
+  const [sqlLoading, setSqlLoading] = useState(false);
+
+  const [buckets, setBuckets] = useState<any[]>([]);
+  const [newBucket, setNewBucket] = useState("");
+  const [bucketPublic, setBucketPublic] = useState(true);
+  const [uploadStatus, setUploadStatus] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const [functions, setFunctions] = useState<any[]>([]);
+  const [fnName, setFnName] = useState("");
+  const [fnCode, setFnCode] = useState("async function handler(req) {\n  return { message: \"Hello from KotahBase\", body: req.body };\n}");
+  const [fnMsg, setFnMsg] = useState("");
+  const [fnResult, setFnResult] = useState<any>(null);
+
+  const [policies, setPolicies] = useState<any[]>([]);
+  const [polTable, setPolTable] = useState("");
+  const [polName, setPolName] = useState("");
+  const [polCommand, setPolCommand] = useState("SELECT");
+  const [polUsing, setPolUsing] = useState("true");
+  const [polMsg, setPolMsg] = useState("");
+
+  const [domains, setDomains] = useState<any[]>([]);
+  const [newDomain, setNewDomain] = useState("");
+  const [domainMsg, setDomainMsg] = useState("");
+
+  const [authLogs, setAuthLogs] = useState<any[]>([]);
+  const [apiLogs, setApiLogs] = useState<any[]>([]);
+
+  const [rtStatus, setRtStatus] = useState("disconnected");
+  const [rtMessages, setRtMessages] = useState<string[]>([]);
+  const [rtRoom, setRtRoom] = useState("global");
+  const [rtInput, setRtInput] = useState("");
+  const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       const t = params.get("token");
-      const err = params.get("error");
       if (t) {
         localStorage.setItem("kotah_token", t);
         setToken(t);
@@ -73,306 +105,271 @@ export default function DashboardPage() {
         window.history.replaceState({}, "", window.location.pathname);
         return;
       }
-      if (err) {
-        setAuthMsg(`OAuth error: ${err}`);
-        window.history.replaceState({}, "", window.location.pathname);
-      }
     }
-
     const saved = localStorage.getItem("kotah_token");
     if (saved) {
       setToken(saved);
       fetchUser(saved).finally(() => setLoading(false));
-    } else {
-      setLoading(false);
-    }
+    } else setLoading(false);
     fetchHealth();
-    const interval = setInterval(fetchHealth, 10000);
-    return () => clearInterval(interval);
+    const iv = setInterval(fetchHealth, 12000);
+    return () => clearInterval(iv);
   }, []);
 
   async function fetchHealth() {
-    try {
-      const res = await fetch(`${API_URL}/health`);
-      setHealth(await res.json());
-    } catch {
-      setHealth({ status: "offline" });
-    }
+    try { setHealth(await (await fetch(`${API_URL}/health`)).json()); }
+    catch { setHealth({ status: "offline" }); }
   }
 
   async function fetchUser(t: string) {
     try {
-      const res = await fetch(`${API_URL}/auth/v1/user`, {
-        headers: { Authorization: `Bearer ${t}` }
-      });
-      if (res.ok) {
-        setUser(await res.json());
-        setToken(t);
-      } else {
-        localStorage.removeItem("kotah_token");
-        setToken(null);
-        setUser(null);
-      }
-    } catch {
-      localStorage.removeItem("kotah_token");
-      setToken(null);
-      setUser(null);
-    }
+      const res = await fetch(`${API_URL}/auth/v1/user`, { headers: { Authorization: `Bearer ${t}` } });
+      if (res.ok) { setUser(await res.json()); setToken(t); }
+      else { localStorage.removeItem("kotah_token"); setToken(null); setUser(null); }
+    } catch { localStorage.removeItem("kotah_token"); setToken(null); setUser(null); }
   }
 
-  async function fetchScores() {
-    try {
-      const res = await fetch(`${API_URL}/rest/v1/game_scores`);
-      const data = await res.json();
-      setScores(Array.isArray(data) ? data : []);
-    } catch { setScores([]); }
-  }
-
-  async function fetchTables() {
-    if (!token) return;
-    try {
-      const res = await fetch(`${API_URL}/sql/tables`, { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) setTables(await res.json());
-    } catch {}
-  }
-
-  async function fetchDomains() {
-    if (!token) return;
-    try {
-      const res = await fetch(`${API_URL}/domains`, { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) setDomains(await res.json());
-    } catch {}
-  }
-
-  async function fetchLogs() {
-    if (!token) return;
-    try {
-      const [a, b] = await Promise.all([
-        fetch(`${API_URL}/logs/auth`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API_URL}/logs/api`, { headers: { Authorization: `Bearer ${token}` } })
-      ]);
-      if (a.ok) setAuthLogs(await a.json());
-      if (b.ok) setApiLogs(await b.json());
-    } catch {}
-  }
-
-  async function fetchUsers() {
-    if (!token) return;
-    try {
-      const res = await fetch(`${API_URL}/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ query: "SELECT id, email, provider, email_confirmed, created_at FROM users ORDER BY created_at DESC LIMIT 100" })
-      });
-      const data = await res.json();
-      if (data.rows) setUsersList(data.rows);
-    } catch {}
+  async function api(path: string, opts: any = {}) {
+    const res = await fetch(`${API_URL}${path}`, {
+      ...opts,
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(opts.headers || {}) }
+    });
+    return { res, data: await res.json() };
   }
 
   async function fetchProjects() {
-    if (!token) return;
-    try {
-      const res = await fetch(`${API_URL}/projects`, { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) setProjects(await res.json());
-    } catch {}
+    const { res, data } = await api("/projects");
+    if (res.ok) setProjects(data);
+  }
+
+  async function fetchTables() {
+    const { res, data } = await api("/tables");
+    if (res.ok) setTables(data);
+  }
+
+  async function fetchBuckets() {
+    const { res, data } = await api("/storage/buckets");
+    if (res.ok) setBuckets(data);
+  }
+
+  async function fetchFunctions() {
+    const { res, data } = await api("/functions");
+    if (res.ok) setFunctions(data);
+  }
+
+  async function fetchPolicies() {
+    const { res, data } = await api("/rls/policies");
+    if (res.ok) setPolicies(data);
+  }
+
+  async function fetchDomains() {
+    const { res, data } = await api("/domains");
+    if (res.ok) setDomains(data);
+  }
+
+  async function fetchLogs() {
+    const [a, b] = await Promise.all([api("/logs/auth"), api("/logs/api")]);
+    if (a.res.ok) setAuthLogs(a.data);
+    if (b.res.ok) setApiLogs(b.data);
   }
 
   useEffect(() => {
     if (!token) return;
-    if (active === "database") fetchScores();
-    if (active === "sql") fetchTables();
+    if (active === "projects") fetchProjects();
+    if (active === "tables" || active === "sql") fetchTables();
+    if (active === "storage") fetchBuckets();
+    if (active === "functions") fetchFunctions();
+    if (active === "rls") { fetchPolicies(); fetchTables(); }
     if (active === "domains") fetchDomains();
     if (active === "logs") fetchLogs();
-    if (active === "users") fetchUsers();
-    if (active === "projects") fetchProjects();
   }, [active, token]);
 
-  function navigate(id: string) {
-    setActive(id);
-    setSidebarOpen(false);
-  }
+  function navigate(id: string) { setActive(id); setSidebarOpen(false); }
 
   // Auth handlers
   async function handleSignup() {
     setAuthLoading(true); setAuthMsg(""); setDevCode("");
     try {
-      const res = await fetch(`${API_URL}/auth/v1/signup`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password })
-      });
+      const res = await fetch(`${API_URL}/auth/v1/signup`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Signup failed");
-      setAuthMsg(data.message);
-      if (data.dev_code) setDevCode(data.dev_code);
-      setAuthMode("verify");
-    } catch (err: any) { setAuthMsg(err.message); }
-    finally { setAuthLoading(false); }
+      if (!res.ok) throw new Error(data.error);
+      setAuthMsg(data.message); if (data.dev_code) setDevCode(data.dev_code); setAuthMode("verify");
+    } catch (e: any) { setAuthMsg(e.message); } finally { setAuthLoading(false); }
   }
 
   async function handleVerify() {
     setAuthLoading(true); setAuthMsg("");
     try {
-      const res = await fetch(`${API_URL}/auth/v1/verify`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, code })
-      });
+      const res = await fetch(`${API_URL}/auth/v1/verify`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, code }) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Verification failed");
-      setToken(data.access_token);
-      localStorage.setItem("kotah_token", data.access_token);
-      setUser(data.user);
-      setAuthMsg("");
-    } catch (err: any) { setAuthMsg(err.message); }
-    finally { setAuthLoading(false); }
+      if (!res.ok) throw new Error(data.error);
+      setToken(data.access_token); localStorage.setItem("kotah_token", data.access_token); setUser(data.user);
+    } catch (e: any) { setAuthMsg(e.message); } finally { setAuthLoading(false); }
   }
 
   async function handleLogin() {
     setAuthLoading(true); setAuthMsg("");
     try {
-      const res = await fetch(`${API_URL}/auth/v1/login`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password })
-      });
+      const res = await fetch(`${API_URL}/auth/v1/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Login failed");
-      setToken(data.access_token);
-      localStorage.setItem("kotah_token", data.access_token);
-      setUser(data.user);
-      setAuthMsg("");
-    } catch (err: any) { setAuthMsg(err.message); }
-    finally { setAuthLoading(false); }
+      if (!res.ok) throw new Error(data.error);
+      setToken(data.access_token); localStorage.setItem("kotah_token", data.access_token); setUser(data.user);
+    } catch (e: any) { setAuthMsg(e.message); } finally { setAuthLoading(false); }
   }
 
   async function handleForgot() {
     setAuthLoading(true); setAuthMsg(""); setDevCode("");
     try {
-      const res = await fetch(`${API_URL}/auth/v1/forgot-password`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email })
-      });
+      const res = await fetch(`${API_URL}/auth/v1/forgot-password`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed");
-      setAuthMsg(data.message);
-      if (data.dev_code) setDevCode(data.dev_code);
-      setAuthMode("reset");
-    } catch (err: any) { setAuthMsg(err.message); }
-    finally { setAuthLoading(false); }
+      if (!res.ok) throw new Error(data.error);
+      setAuthMsg(data.message); if (data.dev_code) setDevCode(data.dev_code); setAuthMode("reset");
+    } catch (e: any) { setAuthMsg(e.message); } finally { setAuthLoading(false); }
   }
 
   async function handleReset() {
     setAuthLoading(true); setAuthMsg("");
     try {
-      const res = await fetch(`${API_URL}/auth/v1/reset-password`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, code, new_password: newPassword })
-      });
+      const res = await fetch(`${API_URL}/auth/v1/reset-password`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, code, new_password: newPassword }) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Reset failed");
-      setAuthMsg(data.message);
-      setAuthMode("login");
-      setPassword(""); setNewPassword(""); setCode("");
-    } catch (err: any) { setAuthMsg(err.message); }
-    finally { setAuthLoading(false); }
+      if (!res.ok) throw new Error(data.error);
+      setAuthMsg(data.message); setAuthMode("login");
+    } catch (e: any) { setAuthMsg(e.message); } finally { setAuthLoading(false); }
   }
 
   function handleLogout() {
-    setToken(null); setUser(null);
-    localStorage.removeItem("kotah_token");
+    setToken(null); setUser(null); localStorage.removeItem("kotah_token");
+    if (wsRef.current) wsRef.current.close();
   }
 
+  // Projects
+  async function createProject() {
+    setProjectMsg("");
+    const { res, data } = await api("/projects", { method: "POST", body: JSON.stringify({ name: projectName, password: projectPassword }) });
+    if (!res.ok) { setProjectMsg(data.error); return; }
+    setProjectMsg(`Created! API Key: ${data.api_key}`);
+    setProjectName(""); setProjectPassword("");
+    fetchProjects();
+  }
+
+  async function openProject(p: any) {
+    setSelectedProject(p);
+    setAuthConfig({ google_client_id: "", google_client_secret: "", github_client_id: "", github_client_secret: "", redirect_url: "" });
+    setAuthConfigMsg("");
+    const { res, data } = await api(`/projects/${p.id}/users`);
+    if (res.ok) setAppUsers(data);
+    else setAppUsers([]);
+  }
+
+  async function saveAuthConfig() {
+    if (!selectedProject) return;
+    setAuthConfigMsg("");
+    const body: any = {};
+    if (authConfig.google_client_id) body.google_client_id = authConfig.google_client_id;
+    if (authConfig.google_client_secret) body.google_client_secret = authConfig.google_client_secret;
+    if (authConfig.github_client_id) body.github_client_id = authConfig.github_client_id;
+    if (authConfig.github_client_secret) body.github_client_secret = authConfig.github_client_secret;
+    if (authConfig.redirect_url) body.redirect_url = authConfig.redirect_url;
+    const { res, data } = await api(`/projects/${selectedProject.id}/auth`, { method: "PUT", body: JSON.stringify(body) });
+    setAuthConfigMsg(res.ok ? "Saved! Your app users can now use these providers." : data.error);
+  }
+
+  // Tables
+  async function createTable() {
+    setTableMsg("");
+    const { res, data } = await api("/tables", { method: "POST", body: JSON.stringify({ name: newTableName, columns: newColumns }) });
+    setTableMsg(res.ok ? `Table ${newTableName} created` : data.error);
+    if (res.ok) { setNewTableName(""); fetchTables(); }
+  }
+
+  // SQL
   async function runSQL() {
-    if (!token) return;
     setSqlLoading(true); setSqlResult(null);
-    try {
-      const res = await fetch(`${API_URL}/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ query: sqlQuery })
-      });
-      setSqlResult(await res.json());
-    } catch (err: any) { setSqlResult({ error: err.message }); }
-    finally { setSqlLoading(false); }
+    const { data } = await api("/sql", { method: "POST", body: JSON.stringify({ query: sqlQuery }) });
+    setSqlResult(data); setSqlLoading(false);
+  }
+
+  // Buckets
+  async function createBucket() {
+    const { res, data } = await api("/storage/buckets", { method: "POST", body: JSON.stringify({ name: newBucket, public: bucketPublic }) });
+    if (res.ok) { setNewBucket(""); fetchBuckets(); }
+    else alert(data.error);
   }
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (!file || !token) return;
+    if (!file) return;
     setUploadStatus("Uploading...");
     try {
       const res = await fetch(`${API_URL}/storage/v1/object/uploads/${file.name}`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": file.type || "application/octet-stream" },
-        body: file
+        method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": file.type || "application/octet-stream" }, body: file
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Upload failed");
-      setUploadedFiles(prev => [...prev, { name: file.name, url: data.url, size: file.size }]);
-      setUploadStatus("Uploaded successfully!");
+      setUploadStatus(res.ok ? "Uploaded!" : data.error);
     } catch (err: any) { setUploadStatus(err.message); }
   }
 
+  // Functions
+  async function saveFunction() {
+    setFnMsg("");
+    const { res, data } = await api("/functions", { method: "POST", body: JSON.stringify({ name: fnName, code: fnCode }) });
+    setFnMsg(res.ok ? "Saved" : data.error);
+    if (res.ok) fetchFunctions();
+  }
+
+  async function invokeFunction(name: string) {
+    const { data } = await api(`/functions/${name}/invoke`, { method: "POST", body: JSON.stringify({ test: true }) });
+    setFnResult(data);
+  }
+
+  // RLS
+  async function createPolicy() {
+    setPolMsg("");
+    const { res, data } = await api("/rls/policies", { method: "POST", body: JSON.stringify({ table: polTable, name: polName, command: polCommand, using_expr: polUsing }) });
+    setPolMsg(res.ok ? "Policy created" : data.error);
+    if (res.ok) fetchPolicies();
+  }
+
+  // Domains
   async function addDomain() {
-    if (!token || !newDomain.trim()) return;
-    try {
-      const res = await fetch(`${API_URL}/domains`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ domain: newDomain.trim() })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed");
-      setDomainMsg(`Domain added! TXT: ${data.instructions?.value}`);
-      setNewDomain("");
-      fetchDomains();
-    } catch (err: any) { setDomainMsg(err.message); }
+    setDomainMsg("");
+    const { res, data } = await api("/domains", { method: "POST", body: JSON.stringify({ domain: newDomain }) });
+    if (res.ok) {
+      setDomainMsg(`Add TXT: ${data.instructions?.value}`);
+      setNewDomain(""); fetchDomains();
+    } else setDomainMsg(data.error);
   }
 
-  async function verifyDomain(id: string) {
-    if (!token) return;
-    try {
-      const res = await fetch(`${API_URL}/domains/${id}/verify`, {
-        method: "POST", headers: { Authorization: `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      setDomainMsg("Domain verified!");
-      fetchDomains();
-    } catch (err: any) { setDomainMsg(err.message); }
+  // Realtime
+  function connectRealtime() {
+    if (wsRef.current) wsRef.current.close();
+    const wsUrl = API_URL.replace("https://", "wss://").replace("http://", "ws://") + "/realtime/v1";
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+    setRtStatus("connecting");
+    ws.onopen = () => setRtStatus("connected");
+    ws.onclose = () => setRtStatus("disconnected");
+    ws.onerror = () => setRtStatus("error");
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        setRtMessages(prev => [`${msg.type}: ${JSON.stringify(msg).slice(0, 120)}`, ...prev].slice(0, 30));
+      } catch {}
+    };
   }
 
-  async function deleteDomain(id: string) {
-    if (!token) return;
-    await fetch(`${API_URL}/domains/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
-    fetchDomains();
+  function joinRoom() {
+    wsRef.current?.send(JSON.stringify({ type: "join", room: rtRoom }));
   }
 
-  async function createProject() {
-    if (!token || !projectName || !projectPassword) return;
-    setProjectMsg("");
-    try {
-      const res = await fetch(`${API_URL}/projects`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name: projectName, password: projectPassword })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed");
-      setProjectMsg(`Project created! API Key: ${data.api_key}`);
-      setProjectName(""); setProjectPassword("");
-      fetchProjects();
-    } catch (err: any) { setProjectMsg(err.message); }
+  function sendBroadcast() {
+    wsRef.current?.send(JSON.stringify({ type: "broadcast", payload: rtInput }));
+    setRtInput("");
   }
 
-  // ============ LOADING ============
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-        <Loader2 className="animate-spin text-violet-500" size={32} />
-      </div>
-    );
-  }
+  if (loading) return <div className="min-h-screen bg-gray-950 flex items-center justify-center"><Loader2 className="animate-spin text-violet-500" size={32} /></div>;
 
-  // ============ AUTH GATE (must login first) ============
+  // AUTH GATE
   if (!token || !user) {
     return (
       <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
@@ -382,356 +379,206 @@ export default function DashboardPage() {
             <h1 className="text-2xl font-semibold text-white">KotahBase</h1>
             <p className="text-gray-400 text-sm mt-1">Sign in to your dashboard</p>
           </div>
-
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
-            {/* Social */}
             <div className="space-y-2 mb-5">
-              <a href={`${API_URL}/auth/v1/google`}
-                className="w-full flex items-center justify-center gap-2 py-2.5 bg-white text-gray-900 rounded-lg text-sm font-medium hover:bg-gray-100">
-                <svg className="w-4 h-4" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-                Continue with Google
-              </a>
-              <a href={`${API_URL}/auth/v1/github`}
-                className="w-full flex items-center justify-center gap-2 py-2.5 bg-gray-800 text-white rounded-lg text-sm font-medium hover:bg-gray-700 border border-gray-700">
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-                Continue with GitHub
-              </a>
+              <a href={`${API_URL}/auth/v1/google`} className="w-full flex items-center justify-center gap-2 py-2.5 bg-white text-gray-900 rounded-lg text-sm font-medium">Continue with Google</a>
+              <a href={`${API_URL}/auth/v1/github`} className="w-full flex items-center justify-center gap-2 py-2.5 bg-gray-800 text-white rounded-lg text-sm font-medium border border-gray-700">Continue with GitHub</a>
             </div>
-
-            <div className="relative mb-5">
-              <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-700"></div></div>
-              <div className="relative flex justify-center text-xs"><span className="px-2 bg-gray-900 text-gray-500">or email</span></div>
-            </div>
-
+            <div className="relative mb-5"><div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-700"></div></div><div className="relative flex justify-center text-xs"><span className="px-2 bg-gray-900 text-gray-500">or email</span></div></div>
             {(authMode === "login" || authMode === "signup") && (
               <div className="flex gap-2 mb-4">
-                <button onClick={() => { setAuthMode("login"); setAuthMsg(""); }} className={`flex-1 px-3 py-2 rounded-lg text-sm ${authMode === "login" ? "bg-violet-600" : "bg-gray-800"}`}>Login</button>
-                <button onClick={() => { setAuthMode("signup"); setAuthMsg(""); }} className={`flex-1 px-3 py-2 rounded-lg text-sm ${authMode === "signup" ? "bg-violet-600" : "bg-gray-800"}`}>Sign Up</button>
+                <button onClick={() => setAuthMode("login")} className={`flex-1 py-2 rounded-lg text-sm ${authMode === "login" ? "bg-violet-600" : "bg-gray-800"}`}>Login</button>
+                <button onClick={() => setAuthMode("signup")} className={`flex-1 py-2 rounded-lg text-sm ${authMode === "signup" ? "bg-violet-600" : "bg-gray-800"}`}>Sign Up</button>
               </div>
             )}
-
             {(authMode === "login" || authMode === "signup" || authMode === "forgot") && (
-              <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 mb-3 text-sm focus:outline-none focus:border-violet-500" />
+              <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 mb-3 text-sm focus:outline-none focus:border-violet-500" />
             )}
-
             {(authMode === "login" || authMode === "signup") && (
-              <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 mb-3 text-sm focus:outline-none focus:border-violet-500" />
+              <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 mb-3 text-sm focus:outline-none focus:border-violet-500" />
             )}
-
-            {authMode === "verify" && (
-              <>
-                <p className="text-sm text-gray-400 mb-3">Code sent to <strong>{email}</strong></p>
-                {devCode && <p className="text-xs text-yellow-400 mb-3">Email failed — code: <strong>{devCode}</strong></p>}
-                <input type="text" placeholder="6-digit code" value={code} onChange={e => setCode(e.target.value)} maxLength={6}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 mb-3 text-sm focus:outline-none focus:border-violet-500 tracking-widest text-center text-lg" />
-              </>
-            )}
-
-            {authMode === "reset" && (
-              <>
-                <p className="text-sm text-gray-400 mb-3">Enter code + new password</p>
-                {devCode && <p className="text-xs text-yellow-400 mb-3">Code: <strong>{devCode}</strong></p>}
-                <input type="text" placeholder="6-digit code" value={code} onChange={e => setCode(e.target.value)} maxLength={6}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 mb-3 text-sm focus:outline-none focus:border-violet-500 tracking-widest text-center text-lg" />
-                <input type="password" placeholder="New password" value={newPassword} onChange={e => setNewPassword(e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 mb-3 text-sm focus:outline-none focus:border-violet-500" />
-              </>
-            )}
-
-            <button
-              onClick={
-                authMode === "login" ? handleLogin :
-                authMode === "signup" ? handleSignup :
-                authMode === "verify" ? handleVerify :
-                authMode === "forgot" ? handleForgot : handleReset
-              }
-              disabled={authLoading}
-              className="w-full py-2.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-50"
-            >
+            {authMode === "verify" && (<>
+              <p className="text-sm text-gray-400 mb-2">Code sent to {email}</p>
+              {devCode && <p className="text-xs text-yellow-400 mb-2">Code: {devCode}</p>}
+              <input type="text" placeholder="6-digit code" value={code} onChange={e => setCode(e.target.value)} maxLength={6} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 mb-3 text-sm text-center tracking-widest" />
+            </>)}
+            {authMode === "reset" && (<>
+              {devCode && <p className="text-xs text-yellow-400 mb-2">Code: {devCode}</p>}
+              <input type="text" placeholder="Code" value={code} onChange={e => setCode(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 mb-3 text-sm" />
+              <input type="password" placeholder="New password" value={newPassword} onChange={e => setNewPassword(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 mb-3 text-sm" />
+            </>)}
+            <button onClick={authMode === "login" ? handleLogin : authMode === "signup" ? handleSignup : authMode === "verify" ? handleVerify : authMode === "forgot" ? handleForgot : handleReset}
+              disabled={authLoading} className="w-full py-2.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-50">
               {authLoading && <Loader2 size={16} className="animate-spin" />}
-              {authMode === "login" ? "Login" : authMode === "signup" ? "Create Account" : authMode === "verify" ? "Verify" : authMode === "forgot" ? "Send Code" : "Reset Password"}
+              {authMode === "login" ? "Login" : authMode === "signup" ? "Sign Up" : authMode === "verify" ? "Verify" : authMode === "forgot" ? "Send Code" : "Reset"}
             </button>
-
-            {authMode === "login" && (
-              <button onClick={() => { setAuthMode("forgot"); setAuthMsg(""); }} className="w-full mt-3 text-sm text-gray-400 hover:text-violet-400">Forgot password?</button>
-            )}
-            {(authMode === "forgot" || authMode === "reset" || authMode === "verify") && (
-              <button onClick={() => { setAuthMode("login"); setAuthMsg(""); }} className="w-full mt-3 text-sm text-gray-400 hover:text-violet-400">Back to Login</button>
-            )}
-
-            {authMsg && (
-              <p className={`mt-4 text-sm text-center ${
-                authMsg.includes("success") || authMsg.includes("sent") || authMsg.includes("updated") || authMsg.includes("created")
-                  ? "text-green-400" : "text-red-400"
-              }`}>{authMsg}</p>
-            )}
+            {authMode === "login" && <button onClick={() => setAuthMode("forgot")} className="w-full mt-3 text-sm text-gray-400">Forgot password?</button>}
+            {(authMode === "forgot" || authMode === "reset" || authMode === "verify") && <button onClick={() => setAuthMode("login")} className="w-full mt-3 text-sm text-gray-400">Back</button>}
+            {authMsg && <p className={`mt-3 text-sm text-center ${authMsg.includes("success") || authMsg.includes("sent") || authMsg.includes("created") || authMsg.includes("updated") ? "text-green-400" : "text-red-400"}`}>{authMsg}</p>}
           </div>
-
-          <p className="text-center text-xs text-gray-600 mt-6">
-            API: {health?.status === "healthy" ? "Online" : "Offline"} · v{health?.version || "—"}
-          </p>
         </div>
       </div>
     );
   }
 
-  // ============ LOGGED IN DASHBOARD ============
+  // DASHBOARD
   return (
     <div className="flex h-screen bg-gray-950 text-gray-100 relative">
       {sidebarOpen && <div className="fixed inset-0 bg-black/60 z-40 md:hidden" onClick={() => setSidebarOpen(false)} />}
-
-      <aside className={`fixed md:static inset-y-0 left-0 z-50 w-64 bg-gray-900 border-r border-gray-800 flex flex-col transform transition-transform duration-200 ease-in-out ${sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}>
+      <aside className={`fixed md:static inset-y-0 left-0 z-50 w-64 bg-gray-900 border-r border-gray-800 flex flex-col transition-transform ${sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}>
         <div className="p-5 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-violet-600 flex items-center justify-center font-bold">K</div>
-            <span className="text-xl font-semibold">KotahBase</span>
-          </div>
-          <button onClick={() => setSidebarOpen(false)} className="md:hidden text-gray-400"><X size={20} /></button>
+          <div className="flex items-center gap-3"><div className="w-9 h-9 rounded-lg bg-violet-600 flex items-center justify-center font-bold">K</div><span className="text-xl font-semibold">KotahBase</span></div>
+          <button onClick={() => setSidebarOpen(false)} className="md:hidden"><X size={20} /></button>
         </div>
-
-        <nav className="flex-1 px-3 space-y-1 mt-2 overflow-y-auto">
-          {nav.map((item) => {
+        <nav className="flex-1 px-3 space-y-0.5 overflow-y-auto">
+          {nav.map(item => {
             const Icon = item.icon;
             return (
               <button key={item.id} onClick={() => navigate(item.id)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition ${
-                  active === item.id ? "bg-violet-600/20 text-violet-400" : "text-gray-400 hover:bg-gray-800 hover:text-white"
-                }`}>
-                <Icon size={18} />{item.name}
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm ${active === item.id ? "bg-violet-600/20 text-violet-400" : "text-gray-400 hover:bg-gray-800"}`}>
+                <Icon size={17} />{item.name}
               </button>
             );
           })}
         </nav>
-
-        <div className="p-4 border-t border-gray-800 text-sm">
-          <div className="text-gray-300 truncate text-xs">{user.email}</div>
-          <div className="mt-1">
-            {health?.status === "healthy" ? <span className="text-green-400 text-xs">● API Online</span> : <span className="text-red-400 text-xs">● Offline</span>}
-          </div>
+        <div className="p-4 border-t border-gray-800 text-xs">
+          <div className="truncate text-gray-300">{user.email}</div>
+          <div className="mt-1">{health?.status === "healthy" ? <span className="text-green-400">● Online</span> : <span className="text-red-400">● Offline</span>}</div>
         </div>
       </aside>
 
-      <main className="flex-1 overflow-auto w-full">
-        <header className="h-14 border-b border-gray-800 flex items-center px-4 md:px-6 gap-3 sticky top-0 bg-gray-950 z-30">
-          <button onClick={() => setSidebarOpen(true)} className="md:hidden text-gray-400"><Menu size={22} /></button>
-          <span className="text-sm text-gray-400 truncate">KotahBase</span>
-          <button onClick={handleLogout} className="ml-auto text-sm text-gray-400 hover:text-white">Logout</button>
+      <main className="flex-1 overflow-auto">
+        <header className="h-14 border-b border-gray-800 flex items-center px-4 gap-3 sticky top-0 bg-gray-950 z-30">
+          <button onClick={() => setSidebarOpen(true)} className="md:hidden"><Menu size={22} /></button>
+          <span className="text-sm text-gray-400">KotahBase</span>
+          <button onClick={handleLogout} className="ml-auto text-sm text-gray-400">Logout</button>
         </header>
 
-        <div className="p-4 md:p-8">
+        <div className="p-4 md:p-6">
           {active === "dashboard" && (
             <div>
-              <h1 className="text-xl md:text-2xl font-semibold mb-4">Overview</h1>
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-5 mb-6">
-                <Card title="API" value={health?.status === "healthy" ? "Online" : "Offline"} icon={<Server size={16} />} />
-                <Card title="Database" value={health?.database === "connected" ? "Connected" : "—"} icon={<Database size={16} />} />
-                <Card title="Storage" value={health?.storage === "connected" ? "Naijacloud" : "—"} icon={<HardDrive size={16} />} />
-                <Card title="Version" value={health?.version || "—"} icon={<Activity size={16} />} />
+              <h1 className="text-xl font-semibold mb-4">Overview</h1>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+                <Card title="API" value={health?.status === "healthy" ? "Online" : "Offline"} />
+                <Card title="Database" value={health?.database || "—"} />
+                <Card title="Storage" value={health?.storage || "—"} />
+                <Card title="Version" value={health?.version || "—"} />
               </div>
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-                <pre className="text-xs text-gray-400 overflow-auto">{JSON.stringify(health, null, 2)}</pre>
-              </div>
-            </div>
-          )}
-
-          {active === "auth-providers" && (
-            <div>
-              <h1 className="text-xl md:text-2xl font-semibold mb-2">Auth Providers</h1>
-              <p className="text-gray-400 mb-6 text-sm">These providers are available for apps built on KotahBase (like Supabase Auth). Your end-users can login with them.</p>
-
-              <div className="grid gap-4 max-w-2xl">
-                <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center">
-                      <svg className="w-5 h-5" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-                    </div>
-                    <div>
-                      <div className="font-medium">Google</div>
-                      <div className="text-xs text-gray-500">OAuth 2.0</div>
-                    </div>
-                  </div>
-                  <span className={`text-xs px-2.5 py-1 rounded-full ${health?.oauth?.google ? "bg-green-600/20 text-green-400" : "bg-gray-800 text-gray-500"}`}>
-                    {health?.oauth?.google ? "Enabled" : "Not configured"}
-                  </span>
-                </div>
-
-                <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-gray-800 flex items-center justify-center">
-                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-                    </div>
-                    <div>
-                      <div className="font-medium">GitHub</div>
-                      <div className="text-xs text-gray-500">OAuth 2.0</div>
-                    </div>
-                  </div>
-                  <span className={`text-xs px-2.5 py-1 rounded-full ${health?.oauth?.github ? "bg-green-600/20 text-green-400" : "bg-gray-800 text-gray-500"}`}>
-                    {health?.oauth?.github ? "Enabled" : "Not configured"}
-                  </span>
-                </div>
-
-                <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-violet-600/20 flex items-center justify-center text-violet-400 font-bold text-sm">@</div>
-                    <div>
-                      <div className="font-medium">Email + Password</div>
-                      <div className="text-xs text-gray-500">OTP verification</div>
-                    </div>
-                  </div>
-                  <span className="text-xs px-2.5 py-1 rounded-full bg-green-600/20 text-green-400">Enabled</span>
-                </div>
-              </div>
-
-              <div className="mt-6 bg-gray-900 border border-gray-800 rounded-xl p-5 max-w-2xl">
-                <h3 className="font-medium mb-2 text-sm">How developers use this</h3>
-                <p className="text-xs text-gray-400 leading-relaxed">
-                  Apps built on KotahBase can redirect users to:<br/>
-                  <code className="text-violet-400">{API_URL}/auth/v1/google</code><br/>
-                  <code className="text-violet-400">{API_URL}/auth/v1/github</code><br/>
-                  After login, users are redirected back with a JWT token.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {active === "users" && (
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <h1 className="text-xl md:text-2xl font-semibold">Users</h1>
-                <button onClick={fetchUsers} className="px-3 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm">Refresh</button>
-              </div>
-              <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-800/50 text-gray-400">
-                      <tr>
-                        <th className="text-left px-4 py-3">Email</th>
-                        <th className="text-left px-4 py-3">Provider</th>
-                        <th className="text-left px-4 py-3 hidden sm:table-cell">Confirmed</th>
-                        <th className="text-left px-4 py-3 hidden md:table-cell">Created</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {usersList.length === 0 ? (
-                        <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-500">No users yet</td></tr>
-                      ) : usersList.map((u) => (
-                        <tr key={u.id} className="border-t border-gray-800">
-                          <td className="px-4 py-3 truncate max-w-[180px]">{u.email}</td>
-                          <td className="px-4 py-3"><span className="text-xs bg-gray-800 px-2 py-0.5 rounded">{u.provider || "email"}</span></td>
-                          <td className="px-4 py-3 hidden sm:table-cell">{u.email_confirmed ? "✅" : "❌"}</td>
-                          <td className="px-4 py-3 text-gray-500 text-xs hidden md:table-cell">{u.created_at ? new Date(u.created_at).toLocaleDateString() : "—"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <pre className="text-xs text-gray-400">{JSON.stringify(health, null, 2)}</pre>
               </div>
             </div>
           )}
 
           {active === "projects" && (
             <div>
-              <h1 className="text-xl md:text-2xl font-semibold mb-2">API Keys / Projects</h1>
-              <p className="text-gray-400 mb-4 text-sm">Create projects to get API keys for your apps</p>
+              <h1 className="text-xl font-semibold mb-2">Projects</h1>
+              <p className="text-gray-400 text-sm mb-4">Create a project → get API key → configure your own Google/GitHub for your app users</p>
 
-              <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-4 max-w-lg">
-                <h3 className="font-medium mb-3 text-sm">Create Project</h3>
-                <input type="text" placeholder="Project name" value={projectName} onChange={e => setProjectName(e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 mb-3 text-sm focus:outline-none focus:border-violet-500" />
-                <input type="password" placeholder="Project password" value={projectPassword} onChange={e => setProjectPassword(e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 mb-3 text-sm focus:outline-none focus:border-violet-500" />
-                <button onClick={createProject} className="px-4 py-2.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium">Create</button>
-                {projectMsg && <p className="mt-3 text-sm text-yellow-400 break-all">{projectMsg}</p>}
-              </div>
-
-              <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                <div className="px-4 py-3 border-b border-gray-800 text-sm text-gray-400">Your Projects</div>
-                {projects.length === 0 ? (
-                  <div className="px-4 py-8 text-center text-gray-500 text-sm">No projects yet</div>
-                ) : projects.map((p) => (
-                  <div key={p.id} className="px-4 py-3 border-t border-gray-800">
-                    <div className="font-medium">{p.name}</div>
-                    <div className="text-xs font-mono text-violet-400 mt-1 break-all">{p.api_key}</div>
+              {!selectedProject ? (
+                <>
+                  <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4 max-w-md">
+                    <input placeholder="Project name" value={projectName} onChange={e => setProjectName(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 mb-2 text-sm" />
+                    <input type="password" placeholder="Project password" value={projectPassword} onChange={e => setProjectPassword(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 mb-2 text-sm" />
+                    <button onClick={createProject} className="px-4 py-2 bg-violet-600 rounded-lg text-sm">Create Project</button>
+                    {projectMsg && <p className="mt-2 text-sm text-yellow-400 break-all">{projectMsg}</p>}
                   </div>
-                ))}
-              </div>
+                  <div className="space-y-2">
+                    {projects.map(p => (
+                      <button key={p.id} onClick={() => openProject(p)} className="w-full text-left bg-gray-900 border border-gray-800 rounded-xl p-4 hover:border-violet-500">
+                        <div className="font-medium">{p.name}</div>
+                        <div className="text-xs font-mono text-violet-400 mt-1 break-all">{p.api_key}</div>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div>
+                  <button onClick={() => setSelectedProject(null)} className="text-sm text-gray-400 mb-4">← Back</button>
+                  <h2 className="font-semibold mb-1">{selectedProject.name}</h2>
+                  <p className="text-xs font-mono text-violet-400 mb-4 break-all">{selectedProject.api_key}</p>
+
+                  <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4">
+                    <h3 className="font-medium mb-3 text-sm">Auth Providers (your own keys)</h3>
+                    <p className="text-xs text-gray-500 mb-3">Paste your Google/GitHub OAuth credentials so YOUR app users can login.</p>
+                    <input placeholder="Google Client ID" value={authConfig.google_client_id} onChange={e => setAuthConfig({ ...authConfig, google_client_id: e.target.value })} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 mb-2 text-sm" />
+                    <input placeholder="Google Client Secret" value={authConfig.google_client_secret} onChange={e => setAuthConfig({ ...authConfig, google_client_secret: e.target.value })} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 mb-2 text-sm" />
+                    <input placeholder="GitHub Client ID" value={authConfig.github_client_id} onChange={e => setAuthConfig({ ...authConfig, github_client_id: e.target.value })} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 mb-2 text-sm" />
+                    <input placeholder="GitHub Client Secret" value={authConfig.github_client_secret} onChange={e => setAuthConfig({ ...authConfig, github_client_secret: e.target.value })} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 mb-2 text-sm" />
+                    <input placeholder="Redirect URL (e.g. https://yourapp.com/auth/callback)" value={authConfig.redirect_url} onChange={e => setAuthConfig({ ...authConfig, redirect_url: e.target.value })} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 mb-3 text-sm" />
+                    <button onClick={saveAuthConfig} className="px-4 py-2 bg-violet-600 rounded-lg text-sm">Save Providers</button>
+                    {authConfigMsg && <p className="mt-2 text-sm text-green-400">{authConfigMsg}</p>}
+
+                    <div className="mt-4 p-3 bg-gray-800 rounded-lg text-xs">
+                      <div className="text-gray-400 mb-1">Your app login URLs:</div>
+                      <div className="font-mono text-violet-400 break-all">Google: {API_URL}/auth/project/{selectedProject.id}/google</div>
+                      <div className="font-mono text-violet-400 break-all mt-1">GitHub: {API_URL}/auth/project/{selectedProject.id}/github</div>
+                    </div>
+                  </div>
+
+                  <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+                    <div className="px-4 py-3 border-b border-gray-800 text-sm text-gray-400">App Users ({appUsers.length})</div>
+                    {appUsers.length === 0 ? <div className="px-4 py-6 text-center text-gray-500 text-sm">No users yet</div> :
+                      appUsers.map(u => (
+                        <div key={u.id} className="px-4 py-2 border-t border-gray-800 text-sm flex justify-between">
+                          <span>{u.email}</span>
+                          <span className="text-xs text-gray-500">{u.provider}</span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
-          {active === "database" && (
+          {active === "tables" && (
             <div>
-              <div className="flex items-center justify-between mb-4">
-                <h1 className="text-xl md:text-2xl font-semibold">Database</h1>
-                <button onClick={fetchScores} className="px-3 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm">Refresh</button>
+              <h1 className="text-xl font-semibold mb-4">Tables</h1>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4 max-w-lg">
+                <input placeholder="table_name" value={newTableName} onChange={e => setNewTableName(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 mb-2 text-sm font-mono" />
+                {newColumns.map((col, i) => (
+                  <div key={i} className="flex gap-2 mb-2">
+                    <input placeholder="column" value={col.name} onChange={e => { const c = [...newColumns]; c[i].name = e.target.value; setNewColumns(c); }} className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm" />
+                    <select value={col.type} onChange={e => { const c = [...newColumns]; c[i].type = e.target.value; setNewColumns(c); }} className="bg-gray-800 border border-gray-700 rounded-lg px-2 text-sm">
+                      {["text", "integer", "boolean", "jsonb", "timestamptz", "uuid", "numeric"].map(t => <option key={t}>{t}</option>)}
+                    </select>
+                  </div>
+                ))}
+                <button onClick={() => setNewColumns([...newColumns, { name: "", type: "text", nullable: true }])} className="text-xs text-violet-400 mb-3">+ Column</button>
+                <br />
+                <button onClick={createTable} className="px-4 py-2 bg-violet-600 rounded-lg text-sm">Create Table</button>
+                {tableMsg && <p className="mt-2 text-sm text-yellow-400">{tableMsg}</p>}
               </div>
-              <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                <div className="px-4 py-3 border-b border-gray-800 text-sm text-gray-400">Table: <span className="text-violet-400">game_scores</span></div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-800/50 text-gray-400">
-                      <tr><th className="text-left px-4 py-3">Player</th><th className="text-left px-4 py-3">Score</th><th className="text-left px-4 py-3 hidden sm:table-cell">ID</th></tr>
-                    </thead>
-                    <tbody>
-                      {scores.length === 0 ? (
-                        <tr><td colSpan={3} className="px-4 py-8 text-center text-gray-500">No data</td></tr>
-                      ) : scores.map((row) => (
-                        <tr key={row.id} className="border-t border-gray-800">
-                          <td className="px-4 py-3">{row.player_name}</td>
-                          <td className="px-4 py-3">{row.score}</td>
-                          <td className="px-4 py-3 text-gray-500 font-mono text-xs hidden sm:table-cell">{row.id?.slice(0, 8)}…</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+              <div className="flex flex-wrap gap-2">
+                {tables.map(t => <span key={t} className="px-3 py-1.5 bg-gray-900 border border-gray-800 rounded-lg text-sm font-mono text-violet-400">{t}</span>)}
               </div>
             </div>
           )}
 
           {active === "sql" && (
             <div>
-              <h1 className="text-xl md:text-2xl font-semibold mb-2">SQL Editor</h1>
-              <div className="flex flex-col lg:flex-row gap-4 mt-4">
-                <div className="lg:w-48 flex-shrink-0">
+              <h1 className="text-xl font-semibold mb-4">SQL Editor</h1>
+              <div className="flex flex-col lg:flex-row gap-4">
+                <div className="lg:w-40">
                   <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
-                    <h3 className="text-xs font-medium mb-2 text-gray-400">Tables</h3>
-                    {tables.map(t => (
-                      <button key={t} onClick={() => setSqlQuery(`SELECT * FROM ${t} LIMIT 20;`)} className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-gray-800 text-violet-400 font-mono">{t}</button>
-                    ))}
+                    {tables.map(t => <button key={t} onClick={() => setSqlQuery(`SELECT * FROM ${t} LIMIT 20;`)} className="block w-full text-left text-xs font-mono text-violet-400 py-1">{t}</button>)}
                   </div>
                 </div>
                 <div className="flex-1 space-y-3">
-                  <textarea value={sqlQuery} onChange={e => setSqlQuery(e.target.value)} rows={5}
-                    className="w-full bg-gray-900 border border-gray-800 rounded-xl p-3 font-mono text-sm focus:outline-none focus:border-violet-500 resize-y" />
-                  <button onClick={runSQL} disabled={sqlLoading} className="px-4 py-2.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium flex items-center gap-2 disabled:opacity-40">
-                    {sqlLoading && <Loader2 size={16} className="animate-spin" />} Run Query
-                  </button>
+                  <textarea value={sqlQuery} onChange={e => setSqlQuery(e.target.value)} rows={5} className="w-full bg-gray-900 border border-gray-800 rounded-xl p-3 font-mono text-sm" />
+                  <button onClick={runSQL} disabled={sqlLoading} className="px-4 py-2 bg-violet-600 rounded-lg text-sm flex items-center gap-2">{sqlLoading && <Loader2 size={14} className="animate-spin" />} Run</button>
                   {sqlResult && (
                     <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                      {sqlResult.error || sqlResult.success === false ? (
-                        <div className="p-4 text-red-400 text-sm">{sqlResult.error}</div>
-                      ) : (
-                        <>
-                          <div className="px-4 py-2 border-b border-gray-800 text-xs text-gray-400">{sqlResult.rowCount} row(s)</div>
+                      {sqlResult.error ? <div className="p-3 text-red-400 text-sm">{sqlResult.error}</div> : (
+                        <div className="overflow-x-auto">
+                          <div className="px-3 py-2 text-xs text-gray-500">{sqlResult.rowCount} rows</div>
                           {sqlResult.rows?.length > 0 && (
-                            <div className="overflow-x-auto">
-                              <table className="w-full text-sm">
-                                <thead className="bg-gray-800/50 text-gray-400">
-                                  <tr>{sqlResult.fields?.map((f: string) => <th key={f} className="text-left px-3 py-2 font-mono text-xs">{f}</th>)}</tr>
-                                </thead>
-                                <tbody>
-                                  {sqlResult.rows.map((row: any, i: number) => (
-                                    <tr key={i} className="border-t border-gray-800">
-                                      {sqlResult.fields?.map((f: string) => <td key={f} className="px-3 py-2 font-mono text-xs max-w-[150px] truncate">{String(row[f] ?? "")}</td>)}
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
+                            <table className="w-full text-sm">
+                              <thead><tr>{sqlResult.fields?.map((f: string) => <th key={f} className="text-left px-3 py-1 text-xs text-gray-400">{f}</th>)}</tr></thead>
+                              <tbody>{sqlResult.rows.map((r: any, i: number) => <tr key={i} className="border-t border-gray-800">{sqlResult.fields?.map((f: string) => <td key={f} className="px-3 py-1 font-mono text-xs truncate max-w-[120px]">{String(r[f] ?? "")}</td>)}</tr>)}</tbody>
+                            </table>
                           )}
-                        </>
+                        </div>
                       )}
                     </div>
                   )}
@@ -742,118 +589,158 @@ export default function DashboardPage() {
 
           {active === "storage" && (
             <div>
-              <h1 className="text-xl md:text-2xl font-semibold mb-4">Storage</h1>
-              <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-4">
+              <h1 className="text-xl font-semibold mb-4">Storage Buckets</h1>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4 max-w-md">
+                <input placeholder="bucket-name" value={newBucket} onChange={e => setNewBucket(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 mb-2 text-sm" />
+                <label className="flex items-center gap-2 text-sm mb-3"><input type="checkbox" checked={bucketPublic} onChange={e => setBucketPublic(e.target.checked)} /> Public</label>
+                <button onClick={createBucket} className="px-4 py-2 bg-violet-600 rounded-lg text-sm">Create Bucket</button>
+              </div>
+              <div className="space-y-2 mb-6">
+                {buckets.map(b => (
+                  <div key={b.id} className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 flex justify-between text-sm">
+                    <span className="font-mono">{b.name}</span>
+                    <span className={`text-xs ${b.public ? "text-green-400" : "text-yellow-400"}`}>{b.public ? "public" : "private"}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
                 <input ref={fileRef} type="file" onChange={handleUpload} className="hidden" />
-                <button onClick={() => fileRef.current?.click()} className="px-4 py-2.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium">Upload File</button>
-                {uploadStatus && <p className={`mt-3 text-sm ${uploadStatus.includes("success") ? "text-green-400" : "text-red-400"}`}>{uploadStatus}</p>}
-              </div>
-              {uploadedFiles.length > 0 && (
-                <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                  {uploadedFiles.map((f, i) => (
-                    <div key={i} className="px-4 py-3 border-t border-gray-800 flex justify-between text-sm">
-                      <span className="truncate">{f.name}</span>
-                      <span className="text-gray-500">{(f.size / 1024).toFixed(1)} KB</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {active === "realtime" && (
-            <div>
-              <h1 className="text-xl md:text-2xl font-semibold mb-4">Realtime</h1>
-              <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
-                <p className="text-gray-400 text-sm">Stable Realtime coming next.</p>
+                <button onClick={() => fileRef.current?.click()} className="px-4 py-2 bg-violet-600 rounded-lg text-sm">Upload File</button>
+                {uploadStatus && <p className="mt-2 text-sm text-yellow-400">{uploadStatus}</p>}
               </div>
             </div>
           )}
 
-          {active === "domains" && (
+          {active === "functions" && (
             <div>
-              <h1 className="text-xl md:text-2xl font-semibold mb-4">Custom Domains</h1>
+              <h1 className="text-xl font-semibold mb-4">Edge Functions</h1>
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4">
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input type="text" placeholder="example.com" value={newDomain} onChange={e => setNewDomain(e.target.value)}
-                    className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-violet-500" />
-                  <button onClick={addDomain} className="px-4 py-2.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium">Add</button>
-                </div>
-                {domainMsg && <p className="mt-3 text-sm text-yellow-400 break-all">{domainMsg}</p>}
+                <input placeholder="function-name" value={fnName} onChange={e => setFnName(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 mb-2 text-sm font-mono" />
+                <textarea value={fnCode} onChange={e => setFnCode(e.target.value)} rows={8} className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 font-mono text-xs mb-2" />
+                <button onClick={saveFunction} className="px-4 py-2 bg-violet-600 rounded-lg text-sm">Save Function</button>
+                {fnMsg && <p className="mt-2 text-sm text-green-400">{fnMsg}</p>}
               </div>
-              <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                {domains.length === 0 ? (
-                  <div className="px-4 py-8 text-center text-gray-500 text-sm">No domains</div>
-                ) : domains.map((d) => (
-                  <div key={d.id} className="px-4 py-3 border-t border-gray-800 flex justify-between gap-2">
-                    <div>
-                      <div className="font-medium">{d.domain}</div>
-                      <div className="text-xs text-gray-500">{d.status}</div>
-                    </div>
-                    <div className="flex gap-2">
-                      {d.status === "pending" && <button onClick={() => verifyDomain(d.id)} className="px-2.5 py-1 bg-green-600/20 text-green-400 rounded text-xs">Verify</button>}
-                      <button onClick={() => deleteDomain(d.id)} className="px-2.5 py-1 bg-red-600/20 text-red-400 rounded text-xs">Delete</button>
-                    </div>
+              <div className="space-y-2">
+                {functions.map(f => (
+                  <div key={f.id} className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 flex justify-between items-center">
+                    <span className="font-mono text-sm">{f.name}</span>
+                    <button onClick={() => invokeFunction(f.name)} className="px-3 py-1 bg-violet-600/20 text-violet-400 rounded text-xs">Invoke</button>
+                  </div>
+                ))}
+              </div>
+              {fnResult && <pre className="mt-4 bg-gray-900 border border-gray-800 rounded-xl p-4 text-xs overflow-auto">{JSON.stringify(fnResult, null, 2)}</pre>}
+            </div>
+          )}
+
+          {active === "rls" && (
+            <div>
+              <h1 className="text-xl font-semibold mb-4">Row Level Security</h1>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4 max-w-lg">
+                <select value={polTable} onChange={e => setPolTable(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 mb-2 text-sm">
+                  <option value="">Select table</option>
+                  {tables.map(t => <option key={t}>{t}</option>)}
+                </select>
+                <input placeholder="policy name" value={polName} onChange={e => setPolName(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 mb-2 text-sm" />
+                <select value={polCommand} onChange={e => setPolCommand(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 mb-2 text-sm">
+                  {["SELECT", "INSERT", "UPDATE", "DELETE", "ALL"].map(c => <option key={c}>{c}</option>)}
+                </select>
+                <input placeholder="USING expression (e.g. true)" value={polUsing} onChange={e => setPolUsing(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 mb-2 text-sm font-mono" />
+                <button onClick={createPolicy} className="px-4 py-2 bg-violet-600 rounded-lg text-sm">Create Policy</button>
+                {polMsg && <p className="mt-2 text-sm text-yellow-400">{polMsg}</p>}
+              </div>
+              <div className="space-y-2">
+                {policies.map(p => (
+                  <div key={p.id} className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 text-sm">
+                    <span className="font-mono text-violet-400">{p.policy_name}</span> on <span className="font-mono">{p.table_name}</span> — {p.command}
                   </div>
                 ))}
               </div>
             </div>
           )}
 
+          {active === "realtime" && (
+            <div>
+              <h1 className="text-xl font-semibold mb-4">Realtime</h1>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4">
+                <div className="flex items-center gap-3 mb-3">
+                  <span className={`text-sm ${rtStatus === "connected" ? "text-green-400" : "text-gray-400"}`}>● {rtStatus}</span>
+                  <button onClick={connectRealtime} className="px-3 py-1.5 bg-violet-600 rounded text-sm">Connect</button>
+                </div>
+                <div className="flex gap-2 mb-3">
+                  <input value={rtRoom} onChange={e => setRtRoom(e.target.value)} placeholder="room" className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm flex-1" />
+                  <button onClick={joinRoom} className="px-3 py-2 bg-gray-800 rounded-lg text-sm">Join</button>
+                </div>
+                <div className="flex gap-2">
+                  <input value={rtInput} onChange={e => setRtInput(e.target.value)} placeholder="message" className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm flex-1" />
+                  <button onClick={sendBroadcast} className="px-3 py-2 bg-violet-600 rounded-lg text-sm">Send</button>
+                </div>
+              </div>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 max-h-64 overflow-y-auto">
+                {rtMessages.length === 0 ? <p className="text-gray-500 text-sm">No messages</p> :
+                  rtMessages.map((m, i) => <div key={i} className="text-xs font-mono text-gray-400 py-0.5">{m}</div>)}
+              </div>
+            </div>
+          )}
+
+          {active === "domains" && (
+            <div>
+              <h1 className="text-xl font-semibold mb-4">Custom Domains</h1>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4">
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input placeholder="example.com" value={newDomain} onChange={e => setNewDomain(e.target.value)} className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm" />
+                  <button onClick={addDomain} className="px-4 py-2 bg-violet-600 rounded-lg text-sm">Add Domain</button>
+                </div>
+                {domainMsg && <p className="mt-2 text-sm text-yellow-400 break-all">{domainMsg}</p>}
+              </div>
+              {domains.map(d => (
+                <div key={d.id} className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 mb-2 flex justify-between">
+                  <div>
+                    <div className="font-medium">{d.domain}</div>
+                    <div className="text-xs text-gray-500">{d.status} {d.verification_token && d.status === "pending" ? `· TXT: ${d.verification_token}` : ""}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {active === "logs" && (
             <div>
-              <div className="flex items-center justify-between mb-4">
-                <h1 className="text-xl md:text-2xl font-semibold">Logs</h1>
-                <button onClick={fetchLogs} className="px-3 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm">Refresh</button>
+              <h1 className="text-xl font-semibold mb-4">Logs</h1>
+              <button onClick={fetchLogs} className="mb-4 px-3 py-1.5 bg-violet-600 rounded text-sm">Refresh</button>
+              <h3 className="text-sm text-gray-400 mb-2">Auth</h3>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden mb-4">
+                {authLogs.slice(0, 15).map((l, i) => (
+                  <div key={i} className="px-3 py-2 border-t border-gray-800 text-xs flex gap-3">
+                    <span className="font-mono">{l.event}</span><span className="truncate">{l.email}</span><span>{l.success ? "✅" : "❌"}</span>
+                  </div>
+                ))}
               </div>
-              <h2 className="text-sm text-gray-400 mb-2">Auth Logs</h2>
-              <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden mb-6">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-800/50 text-gray-400"><tr><th className="text-left px-4 py-2">Event</th><th className="text-left px-4 py-2">Email</th><th className="text-left px-4 py-2">OK</th></tr></thead>
-                    <tbody>
-                      {authLogs.length === 0 ? <tr><td colSpan={3} className="px-4 py-6 text-center text-gray-500">No logs</td></tr> :
-                        authLogs.map((l, i) => (
-                          <tr key={i} className="border-t border-gray-800">
-                            <td className="px-4 py-2 font-mono text-xs">{l.event}</td>
-                            <td className="px-4 py-2 truncate max-w-[140px]">{l.email}</td>
-                            <td className="px-4 py-2">{l.success ? "✅" : "❌"}</td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              <h2 className="text-sm text-gray-400 mb-2">API Logs</h2>
+              <h3 className="text-sm text-gray-400 mb-2">API</h3>
               <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-800/50 text-gray-400"><tr><th className="text-left px-4 py-2">Method</th><th className="text-left px-4 py-2">Path</th><th className="text-left px-4 py-2">Status</th></tr></thead>
-                    <tbody>
-                      {apiLogs.length === 0 ? <tr><td colSpan={3} className="px-4 py-6 text-center text-gray-500">No logs</td></tr> :
-                        apiLogs.map((l, i) => (
-                          <tr key={i} className="border-t border-gray-800">
-                            <td className="px-4 py-2 font-mono text-xs">{l.method}</td>
-                            <td className="px-4 py-2 font-mono text-xs truncate max-w-[160px]">{l.path}</td>
-                            <td className={`px-4 py-2 ${l.status >= 400 ? "text-red-400" : "text-green-400"}`}>{l.status}</td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                </div>
+                {apiLogs.slice(0, 15).map((l, i) => (
+                  <div key={i} className="px-3 py-2 border-t border-gray-800 text-xs flex gap-3">
+                    <span className="font-mono">{l.method}</span><span className="truncate">{l.path}</span><span className={l.status >= 400 ? "text-red-400" : "text-green-400"}>{l.status}</span>
+                  </div>
+                ))}
               </div>
+            </div>
+          )}
+
+          {active === "users" && (
+            <div>
+              <h1 className="text-xl font-semibold mb-4">Platform Users</h1>
+              <p className="text-gray-400 text-sm">Dashboard owners. App users are under each Project.</p>
             </div>
           )}
 
           {active === "settings" && (
             <div>
-              <h1 className="text-xl md:text-2xl font-semibold mb-4">Settings</h1>
-              <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 max-w-xl space-y-4 text-sm">
-                <div><div className="text-gray-400 mb-1">API URL</div><div className="font-mono bg-gray-800 px-3 py-2 rounded text-xs break-all">{API_URL}</div></div>
-                <div><div className="text-gray-400 mb-1">Logged in as</div><div>{user.email}</div></div>
-                <div><div className="text-gray-400 mb-1">Version</div><div>0.5.0</div></div>
-                <div><div className="text-gray-400 mb-1">Storage</div><div>Naijacloud (Port Harcourt)</div></div>
-                <div><div className="text-gray-400 mb-1">OAuth</div><div>Google: {health?.oauth?.google ? "✅" : "❌"} · GitHub: {health?.oauth?.github ? "✅" : "❌"}</div></div>
+              <h1 className="text-xl font-semibold mb-4">Settings</h1>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 max-w-lg space-y-3 text-sm">
+                <div><div className="text-gray-400">API</div><div className="font-mono text-xs break-all">{API_URL}</div></div>
+                <div><div className="text-gray-400">Email</div><div>{user.email}</div></div>
+                <div><div className="text-gray-400">Version</div><div>{health?.version || "0.7.0"}</div></div>
+                <div><div className="text-gray-400">Storage</div><div>Naijacloud (Port Harcourt)</div></div>
               </div>
             </div>
           )}
@@ -863,13 +750,11 @@ export default function DashboardPage() {
   );
 }
 
-function Card({ title, value, icon }: { title: string; value: any; icon?: React.ReactNode }) {
+function Card({ title, value }: { title: string; value: any }) {
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 md:p-5">
-      <div className="flex items-center justify-between text-xs md:text-sm text-gray-400 mb-1">
-        <span className="truncate">{title}</span>{icon}
-      </div>
-      <div className="text-lg md:text-2xl font-semibold truncate">{value}</div>
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+      <div className="text-xs text-gray-400 mb-1">{title}</div>
+      <div className="text-lg font-semibold truncate">{value}</div>
     </div>
   );
 }
