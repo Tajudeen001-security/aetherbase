@@ -1,13 +1,15 @@
 {
   "name": "@kotahbase/sdk",
   "version": "0.1.0",
-  "description": "Official JavaScript/TypeScript SDK for KotahBase",
+  "description": "Official KotahBase JavaScript/TypeScript SDK",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch"
   },
+  "keywords": ["kotahbase", "baas", "supabase", "firebase", "backend"],
+  "license": "MIT",
   "devDependencies": {
     "typescript": "^5"
   }
