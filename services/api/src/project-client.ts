@@ -1,12 +1,8 @@
 /**
  * Per-project client API (Supabase-style)
- * Each project has:
- *   url:              https://api.../p/{ref}
- *   anon_key:         public key for browsers / mobile apps
- *   service_role_key: secret key for servers (full access)
- *
- * Client sends:  apikey: <anon_key|service_role_key>
- * Optional:      Authorization: Bearer <user_jwt>
+ * Auth for APP USERS (not dashboard owners):
+ *   Email/password signup+login
+ *   Google / GitHub OAuth with Site URL + redirect allow-list
  */
 import { Hono } from "hono";
 import bcrypt from "bcryptjs";
@@ -21,20 +17,6 @@ function createToken(payload: object, expiresIn = "7d") {
   return jwt.sign(payload, JWT_SECRET, { expiresIn } as any);
 }
 
-/** Resolve project from apikey header or path ref */
-export async function resolveProject(ref: string, apikey: string | undefined) {
-  if (!apikey) return null;
-  const res = await query(
-    `SELECT id, name, ref, anon_key, service_role_key, api_key, owner_id, google_client_id, google_client_secret, github_client_id, github_client_secret, redirect_url
-     FROM projects WHERE ref = $1 AND (anon_key = $2 OR service_role_key = $2 OR api_key = $2)`,
-    [ref, apikey]
-  );
-  if (res.rows.length === 0) return null;
-  const p = res.rows[0];
-  const role = apikey === p.service_role_key || apikey === p.api_key ? "service_role" : "anon";
-  return { ...p, role };
-}
-
 export function projectUrl(ref: string) {
   return `${API_URL}/p/${ref}`;
 }
@@ -46,9 +28,266 @@ export function makeKeys() {
   return { ref, anon_key, service_role_key };
 }
 
+async function loadProjectByRef(ref: string) {
+  const res = await query(
+    `SELECT id, name, ref, anon_key, service_role_key, api_key, owner_id,
+            google_client_id, google_client_secret, github_client_id, github_client_secret,
+            redirect_url, site_url, additional_redirect_urls,
+            enable_email, enable_google, enable_github
+     FROM projects WHERE ref = $1`,
+    [ref]
+  );
+  return res.rows[0] || null;
+}
+
+export async function resolveProject(ref: string, apikey: string | undefined) {
+  if (!apikey) return null;
+  const p = await loadProjectByRef(ref);
+  if (!p) return null;
+  if (apikey !== p.anon_key && apikey !== p.service_role_key && apikey !== p.api_key) return null;
+  const role = apikey === p.service_role_key || apikey === p.api_key ? "service_role" : "anon";
+  return { ...p, role };
+}
+
+function isAllowedRedirect(project: any, target: string | null | undefined): boolean {
+  if (!target) return false;
+  try {
+    const u = new URL(target);
+    const allowed: string[] = [];
+    if (project.site_url) allowed.push(project.site_url);
+    if (project.redirect_url) allowed.push(project.redirect_url);
+    let extra = project.additional_redirect_urls;
+    if (typeof extra === "string") {
+      try { extra = JSON.parse(extra); } catch { extra = []; }
+    }
+    if (Array.isArray(extra)) allowed.push(...extra);
+    return allowed.some((a) => {
+      try {
+        const b = new URL(a);
+        return b.origin === u.origin;
+      } catch {
+        return a === target || target.startsWith(a);
+      }
+    });
+  } catch {
+    return false;
+  }
+}
+
+function pickRedirect(project: any, requested: string | undefined) {
+  if (requested && isAllowedRedirect(project, requested)) return requested;
+  return project.site_url || project.redirect_url || null;
+}
+
 export const projectClientRoutes = new Hono();
 
+// OAuth authorize + callback must work WITHOUT apikey (browser redirect)
+projectClientRoutes.get("/:ref/auth/v1/authorize/:provider", async (c) => {
+  const ref = c.req.param("ref");
+  const provider = c.req.param("provider");
+  const redirectTo = c.req.query("redirect_to") || undefined;
+  const project = await loadProjectByRef(ref);
+  if (!project) return c.json({ error: "Project not found" }, 404);
+
+  const state = Buffer.from(JSON.stringify({ ref, redirect_to: redirectTo || null })).toString("base64url");
+
+  if (provider === "google") {
+    if (project.enable_google === false) return c.json({ error: "Google disabled for this project" }, 403);
+    if (!project.google_client_id) return c.json({ error: "Google not configured. Add Client ID in Auth settings." }, 400);
+    const redirectUri = `${API_URL}/p/${ref}/auth/v1/callback/google`;
+    const url =
+      `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(project.google_client_id)}` +
+      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+      `&response_type=code&scope=openid%20email%20profile&access_type=offline&prompt=consent` +
+      `&state=${state}`;
+    return c.redirect(url);
+  }
+
+  if (provider === "github") {
+    if (project.enable_github === false) return c.json({ error: "GitHub disabled for this project" }, 403);
+    if (!project.github_client_id) return c.json({ error: "GitHub not configured. Add Client ID in Auth settings." }, 400);
+    const redirectUri = `${API_URL}/p/${ref}/auth/v1/callback/github`;
+    const url =
+      `https://github.com/login/oauth/authorize?client_id=${encodeURIComponent(project.github_client_id)}` +
+      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+      `&scope=user:email&state=${state}`;
+    return c.redirect(url);
+  }
+
+  return c.json({ error: "Unknown provider. Use google or github." }, 400);
+});
+
+projectClientRoutes.get("/:ref/auth/v1/callback/google", async (c) => {
+  const ref = c.req.param("ref");
+  try {
+    const code = c.req.query("code");
+    const stateRaw = c.req.query("state") || "";
+    let redirectTo: string | undefined;
+    try {
+      const st = JSON.parse(Buffer.from(stateRaw, "base64url").toString());
+      redirectTo = st.redirect_to || undefined;
+    } catch {}
+    const project = await loadProjectByRef(ref);
+    if (!project || !code || !project.google_client_id || !project.google_client_secret) {
+      return c.text("OAuth failed", 400);
+    }
+    const redirectUri = `${API_URL}/p/${ref}/auth/v1/callback/google`;
+    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        client_id: project.google_client_id,
+        client_secret: project.google_client_secret,
+        redirect_uri: redirectUri,
+        grant_type: "authorization_code"
+      })
+    });
+    const tokens = await tokenRes.json();
+    if (!tokens.access_token) return c.text("Token exchange failed", 400);
+    const profile = await (
+      await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+        headers: { Authorization: `Bearer ${tokens.access_token}` }
+      })
+    ).json();
+    if (!profile.email) return c.text("No email from Google", 400);
+
+    let row = await query(
+      "SELECT * FROM app_users WHERE project_id = $1 AND email = $2",
+      [project.id, profile.email.toLowerCase()]
+    );
+    let user;
+    if (row.rows.length === 0) {
+      const id = uuidv4();
+      await query(
+        `INSERT INTO app_users (id, project_id, email, password, provider, provider_id) VALUES ($1,$2,$3,NULL,'google',$4)`,
+        [id, project.id, profile.email.toLowerCase(), String(profile.id)]
+      );
+      user = { id, email: profile.email.toLowerCase(), provider: "google" };
+    } else {
+      user = row.rows[0];
+      await query(`UPDATE app_users SET provider='google', provider_id=$1 WHERE id=$2`, [
+        String(profile.id),
+        user.id
+      ]);
+    }
+
+    const access_token = createToken({
+      sub: user.id,
+      email: user.email,
+      project_id: project.id,
+      role: "authenticated"
+    });
+    const dest = pickRedirect(project, redirectTo);
+    if (!dest) {
+      return c.json({
+        access_token,
+        token_type: "bearer",
+        expires_in: 604800,
+        user: { id: user.id, email: user.email, provider: "google" },
+        note: "Set Site URL in Auth settings to redirect to your app"
+      });
+    }
+    const sep = dest.includes("#") ? "&" : "#";
+    return c.redirect(
+      `${dest}${sep}access_token=${access_token}&token_type=bearer&provider=google`
+    );
+  } catch (e: any) {
+    return c.text("Google callback error: " + (e.message || "failed"), 500);
+  }
+});
+
+projectClientRoutes.get("/:ref/auth/v1/callback/github", async (c) => {
+  const ref = c.req.param("ref");
+  try {
+    const code = c.req.query("code");
+    const stateRaw = c.req.query("state") || "";
+    let redirectTo: string | undefined;
+    try {
+      const st = JSON.parse(Buffer.from(stateRaw, "base64url").toString());
+      redirectTo = st.redirect_to || undefined;
+    } catch {}
+    const project = await loadProjectByRef(ref);
+    if (!project || !code || !project.github_client_id || !project.github_client_secret) {
+      return c.text("OAuth failed", 400);
+    }
+    const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        client_id: project.github_client_id,
+        client_secret: project.github_client_secret,
+        code
+      })
+    });
+    const tokens = await tokenRes.json();
+    if (!tokens.access_token) return c.text("Token exchange failed", 400);
+    const profile = await (
+      await fetch("https://api.github.com/user", {
+        headers: { Authorization: `Bearer ${tokens.access_token}`, Accept: "application/json" }
+      })
+    ).json();
+    let email = profile.email;
+    if (!email) {
+      const emails = await (
+        await fetch("https://api.github.com/user/emails", {
+          headers: { Authorization: `Bearer ${tokens.access_token}`, Accept: "application/json" }
+        })
+      ).json();
+      email = (emails.find((e: any) => e.primary) || emails[0])?.email;
+    }
+    if (!email) return c.text("No email from GitHub", 400);
+
+    let row = await query(
+      "SELECT * FROM app_users WHERE project_id = $1 AND email = $2",
+      [project.id, email.toLowerCase()]
+    );
+    let user;
+    if (row.rows.length === 0) {
+      const id = uuidv4();
+      await query(
+        `INSERT INTO app_users (id, project_id, email, password, provider, provider_id) VALUES ($1,$2,$3,NULL,'github',$4)`,
+        [id, project.id, email.toLowerCase(), String(profile.id)]
+      );
+      user = { id, email: email.toLowerCase(), provider: "github" };
+    } else {
+      user = row.rows[0];
+      await query(`UPDATE app_users SET provider='github', provider_id=$1 WHERE id=$2`, [
+        String(profile.id),
+        user.id
+      ]);
+    }
+
+    const access_token = createToken({
+      sub: user.id,
+      email: user.email,
+      project_id: project.id,
+      role: "authenticated"
+    });
+    const dest = pickRedirect(project, redirectTo);
+    if (!dest) {
+      return c.json({
+        access_token,
+        token_type: "bearer",
+        expires_in: 604800,
+        user: { id: user.id, email: user.email, provider: "github" }
+      });
+    }
+    const sep = dest.includes("#") ? "&" : "#";
+    return c.redirect(
+      `${dest}${sep}access_token=${access_token}&token_type=bearer&provider=github`
+    );
+  } catch (e: any) {
+    return c.text("GitHub callback error: " + (e.message || "failed"), 500);
+  }
+});
+
 async function projectMw(c: any, next: any) {
+  const path = c.req.path || "";
+  // skip mw for oauth authorize/callback (already handled above)
+  if (path.includes("/auth/v1/authorize/") || path.includes("/auth/v1/callback/")) {
+    return next();
+  }
   const ref = c.req.param("ref");
   const apikey = c.req.header("apikey") || c.req.header("x-api-key") || "";
   const project = await resolveProject(ref, apikey);
@@ -56,6 +295,7 @@ async function projectMw(c: any, next: any) {
   c.set("project", project);
   await next();
 }
+
 projectClientRoutes.use("/:ref", projectMw);
 projectClientRoutes.use("/:ref/*", projectMw);
 
@@ -66,25 +306,22 @@ projectClientRoutes.get("/:ref", async (c) => {
     ref: project.ref,
     url: projectUrl(project.ref),
     role: project.role,
-    version: "0.10.0"
-  });
-});
-
-projectClientRoutes.get("/:ref/", async (c) => {
-  const project = (c as any).get("project");
-  return c.json({
-    name: project.name,
-    ref: project.ref,
-    url: projectUrl(project.ref),
-    role: project.role
+    version: "0.11.0",
+    auth: {
+      email: project.enable_email !== false,
+      google: !!(project.enable_google !== false && project.google_client_id),
+      github: !!(project.enable_github !== false && project.github_client_id),
+      site_url: project.site_url || null
+    }
   });
 });
 
 projectClientRoutes.post("/:ref/auth/v1/signup", async (c) => {
   try {
     const project = (c as any).get("project");
+    if (project.enable_email === false) return c.json({ error: "Email auth disabled" }, 403);
     const { email, password } = await c.req.json();
-    if (!email || !password) return c.json({ error: "Email and password required" }, 400);
+    if (!email || !password) return c.json({ error: "email and password required" }, 400);
     if (password.length < 6) return c.json({ error: "Password min 6 chars" }, 400);
     const existing = await query(
       "SELECT id FROM app_users WHERE project_id = $1 AND email = $2",
@@ -97,12 +334,17 @@ projectClientRoutes.post("/:ref/auth/v1/signup", async (c) => {
       `INSERT INTO app_users (id, project_id, email, password, provider) VALUES ($1,$2,$3,$4,'email')`,
       [id, project.id, email.toLowerCase(), hashed]
     );
-    const token = createToken({ sub: id, email: email.toLowerCase(), project_id: project.id, role: "authenticated" });
+    const access_token = createToken({
+      sub: id,
+      email: email.toLowerCase(),
+      project_id: project.id,
+      role: "authenticated"
+    });
     return c.json({
-      access_token: token,
+      access_token,
       token_type: "bearer",
       expires_in: 604800,
-      user: { id, email: email.toLowerCase(), role: "authenticated" }
+      user: { id, email: email.toLowerCase(), provider: "email" }
     }, 201);
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
@@ -112,23 +354,30 @@ projectClientRoutes.post("/:ref/auth/v1/signup", async (c) => {
 projectClientRoutes.post("/:ref/auth/v1/login", async (c) => {
   try {
     const project = (c as any).get("project");
+    if (project.enable_email === false) return c.json({ error: "Email auth disabled" }, 403);
     const { email, password } = await c.req.json();
-    if (!email || !password) return c.json({ error: "Email and password required" }, 400);
+    if (!email || !password) return c.json({ error: "email and password required" }, 400);
     const res = await query(
       "SELECT * FROM app_users WHERE project_id = $1 AND email = $2",
       [project.id, email.toLowerCase()]
     );
-    if (res.rows.length === 0) return c.json({ error: "Invalid login" }, 401);
-    const u = res.rows[0];
-    if (!u.password || !(await bcrypt.compare(password, u.password))) {
-      return c.json({ error: "Invalid login" }, 401);
+    if (res.rows.length === 0) return c.json({ error: "Invalid credentials" }, 401);
+    const user = res.rows[0];
+    if (!user.password) return c.json({ error: "Use social login for this account" }, 400);
+    if (!(await bcrypt.compare(password, user.password))) {
+      return c.json({ error: "Invalid credentials" }, 401);
     }
-    const token = createToken({ sub: u.id, email: u.email, project_id: project.id, role: "authenticated" });
+    const access_token = createToken({
+      sub: user.id,
+      email: user.email,
+      project_id: project.id,
+      role: "authenticated"
+    });
     return c.json({
-      access_token: token,
+      access_token,
       token_type: "bearer",
       expires_in: 604800,
-      user: { id: u.id, email: u.email, role: "authenticated" }
+      user: { id: user.id, email: user.email, provider: user.provider }
     });
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
@@ -136,9 +385,9 @@ projectClientRoutes.post("/:ref/auth/v1/login", async (c) => {
 });
 
 projectClientRoutes.get("/:ref/auth/v1/user", async (c) => {
-  const auth = c.req.header("Authorization");
-  if (!auth?.startsWith("Bearer ")) return c.json({ error: "Not authenticated" }, 401);
   try {
+    const auth = c.req.header("Authorization") || "";
+    if (!auth.startsWith("Bearer ")) return c.json({ error: "Missing token" }, 401);
     const payload = jwt.verify(auth.split(" ")[1], JWT_SECRET) as any;
     const project = (c as any).get("project");
     if (payload.project_id && payload.project_id !== project.id) {
@@ -153,6 +402,20 @@ projectClientRoutes.get("/:ref/auth/v1/user", async (c) => {
   } catch {
     return c.json({ error: "Invalid token" }, 401);
   }
+});
+
+projectClientRoutes.get("/:ref/auth/v1/settings", async (c) => {
+  const project = (c as any).get("project");
+  return c.json({
+    email: project.enable_email !== false,
+    google: !!(project.enable_google !== false && project.google_client_id),
+    github: !!(project.enable_github !== false && project.github_client_id),
+    site_url: project.site_url || null,
+    authorize: {
+      google: `${projectUrl(project.ref)}/auth/v1/authorize/google`,
+      github: `${projectUrl(project.ref)}/auth/v1/authorize/github`
+    }
+  });
 });
 
 projectClientRoutes.get("/:ref/rest/v1/:table", async (c) => {
