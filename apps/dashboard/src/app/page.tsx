@@ -10,12 +10,14 @@ const nav = [
   { name: "Auth", id: "auth", icon: "🛡" },
   { name: "Users", id: "users", icon: "👤" },
   { name: "Tables", id: "tables", icon: "▤" },
+  { name: "Data", id: "data", icon: "▦" },
   { name: "SQL Editor", id: "sql", icon: "⌘" },
   { name: "Storage", id: "storage", icon: "📦" },
   { name: "Functions", id: "functions", icon: "⚡" },
   { name: "RLS", id: "rls", icon: "🔒" },
   { name: "Realtime", id: "realtime", icon: "📡" },
   { name: "AI / Vector", id: "ai", icon: "✦" },
+  { name: "Webhooks", id: "webhooks", icon: "🔗" },
   { name: "Domains", id: "domains", icon: "🌐" },
   { name: "Logs", id: "logs", icon: "📋" },
   { name: "Settings", id: "settings", icon: "⚙" }
@@ -28,6 +30,7 @@ export default function DashboardPage() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [health, setHealth] = useState<any>(null);
+  const [usage, setUsage] = useState<any>(null);
 
   const [authMode, setAuthMode] = useState<"login" | "signup" | "verify" | "forgot" | "reset">("login");
   const [email, setEmail] = useState("");
@@ -46,11 +49,19 @@ export default function DashboardPage() {
   const [authConfig, setAuthConfig] = useState({ google_client_id: "", google_client_secret: "", github_client_id: "", github_client_secret: "", redirect_url: "" });
   const [authConfigMsg, setAuthConfigMsg] = useState("");
   const [appUsers, setAppUsers] = useState<any[]>([]);
+  const [regenMsg, setRegenMsg] = useState("");
 
   const [tables, setTables] = useState<string[]>([]);
   const [tableMsg, setTableMsg] = useState("");
   const [newTableName, setNewTableName] = useState("");
   const [newColumns, setNewColumns] = useState([{ name: "title", type: "text" }]);
+  const [seedMsg, setSeedMsg] = useState("");
+
+  const [dataTable, setDataTable] = useState("");
+  const [dataRows, setDataRows] = useState<any>(null);
+  const [dataLoading, setDataLoading] = useState(false);
+  const [insertJson, setInsertJson] = useState('{\n  "title": "Hello"\n}');
+  const [insertMsg, setInsertMsg] = useState("");
 
   const [sqlQuery, setSqlQuery] = useState("SELECT * FROM game_scores LIMIT 10;");
   const [sqlResult, setSqlResult] = useState<any>(null);
@@ -73,6 +84,11 @@ export default function DashboardPage() {
   const [polCommand, setPolCommand] = useState("SELECT");
   const [polUsing, setPolUsing] = useState("true");
   const [polMsg, setPolMsg] = useState("");
+
+  const [webhooks, setWebhooks] = useState<any[]>([]);
+  const [whUrl, setWhUrl] = useState("");
+  const [whEvents, setWhEvents] = useState("user.created, post.created");
+  const [whMsg, setWhMsg] = useState("");
 
   const [domains, setDomains] = useState<any[]>([]);
   const [newDomain, setNewDomain] = useState("");
@@ -191,6 +207,11 @@ export default function DashboardPage() {
     if (wsRef.current) wsRef.current.close();
   }
 
+  async function fetchUsage() {
+    const { res, data } = await api("/v1/usage");
+    if (res.ok) setUsage(data);
+  }
+
   async function fetchProjects() {
     const { res, data } = await api("/projects");
     if (res.ok) setProjects(data);
@@ -203,7 +224,7 @@ export default function DashboardPage() {
   async function openProject(p: any) {
     setSelectedProject(p);
     setAuthConfig({ google_client_id: "", google_client_secret: "", github_client_id: "", github_client_secret: "", redirect_url: "" });
-    setAuthConfigMsg("");
+    setAuthConfigMsg(""); setRegenMsg("");
     const { res, data } = await api(`/projects/${p.id}/users`);
     setAppUsers(res.ok ? data : []);
   }
@@ -216,7 +237,16 @@ export default function DashboardPage() {
     if (authConfig.github_client_secret) body.github_client_secret = authConfig.github_client_secret;
     if (authConfig.redirect_url) body.redirect_url = authConfig.redirect_url;
     const { res, data } = await api(`/projects/${selectedProject.id}/auth`, { method: "PUT", body: JSON.stringify(body) });
-    setAuthConfigMsg(res.ok ? "Saved! App users can use these providers." : data.error);
+    setAuthConfigMsg(res.ok ? "Saved!" : data.error);
+  }
+  async function regenerateKey() {
+    if (!selectedProject) return;
+    const { res, data } = await api(`/v1/projects/${selectedProject.id}/regenerate-key`, { method: "POST", body: "{}" });
+    if (res.ok) {
+      setRegenMsg(`New key: ${data.api_key}`);
+      setSelectedProject({ ...selectedProject, api_key: data.api_key });
+      fetchProjects();
+    } else setRegenMsg(data.error || "Failed");
   }
 
   async function fetchTables() {
@@ -229,10 +259,33 @@ export default function DashboardPage() {
     setTableMsg(res.ok ? (data.message || "Installed") : (data.error || "Failed"));
     if (res.ok) fetchTables();
   }
+  async function seedPack(id: string) {
+    setSeedMsg("Seeding...");
+    const { res, data } = await api(`/v1/seed/${id}`, { method: "POST", body: "{}" });
+    setSeedMsg(res.ok ? (data.message || "Seeded") : (data.error || "Failed"));
+  }
   async function createTable() {
     const { res, data } = await api("/tables", { method: "POST", body: JSON.stringify({ name: newTableName, columns: newColumns }) });
     setTableMsg(res.ok ? `Table ${newTableName} created` : data.error);
     if (res.ok) { setNewTableName(""); fetchTables(); }
+  }
+
+  async function loadTableData(table: string) {
+    setDataTable(table);
+    setDataLoading(true);
+    const { res, data } = await api(`/v1/data/${table}?limit=50`);
+    setDataRows(res.ok ? data : { error: data.error });
+    setDataLoading(false);
+  }
+  async function insertRow() {
+    if (!dataTable) return;
+    setInsertMsg("");
+    try {
+      const body = JSON.parse(insertJson);
+      const { res, data } = await api(`/v1/data/${dataTable}`, { method: "POST", body: JSON.stringify(body) });
+      setInsertMsg(res.ok ? "Row inserted" : data.error);
+      if (res.ok) loadTableData(dataTable);
+    } catch (e: any) { setInsertMsg(e.message); }
   }
 
   async function runSQL() {
@@ -284,6 +337,21 @@ export default function DashboardPage() {
     const { res, data } = await api("/rls/policies", { method: "POST", body: JSON.stringify({ table: polTable, name: polName, command: polCommand, using_expr: polUsing }) });
     setPolMsg(res.ok ? "Policy created" : data.error);
     if (res.ok) fetchPolicies();
+  }
+
+  async function fetchWebhooks() {
+    const { res, data } = await api("/v1/webhooks");
+    if (res.ok) setWebhooks(data);
+  }
+  async function createWebhook() {
+    const events = whEvents.split(",").map(s => s.trim()).filter(Boolean);
+    const { res, data } = await api("/v1/webhooks", { method: "POST", body: JSON.stringify({ url: whUrl, events }) });
+    setWhMsg(res.ok ? `Created. Secret: ${data.secret}` : data.error);
+    if (res.ok) { setWhUrl(""); fetchWebhooks(); }
+  }
+  async function deleteWebhook(id: string) {
+    await api(`/v1/webhooks/${id}`, { method: "DELETE" });
+    fetchWebhooks();
   }
 
   async function fetchDomains() {
@@ -338,11 +406,13 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!token) return;
+    if (active === "dashboard") fetchUsage();
     if (active === "projects") fetchProjects();
-    if (active === "tables" || active === "sql" || active === "rls") fetchTables();
+    if (active === "tables" || active === "sql" || active === "rls" || active === "data") fetchTables();
     if (active === "storage") fetchBuckets();
     if (active === "functions") fetchFunctions();
     if (active === "rls") fetchPolicies();
+    if (active === "webhooks") fetchWebhooks();
     if (active === "domains") fetchDomains();
     if (active === "logs") fetchLogs();
     if (active === "ai") loadAiList();
@@ -352,7 +422,6 @@ export default function DashboardPage() {
 
   if (loading) return <div className="min-h-screen bg-gray-950 flex items-center justify-center text-white">Loading...</div>;
 
-  // AUTH GATE
   if (!token || !user) {
     return (
       <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
@@ -396,14 +465,13 @@ export default function DashboardPage() {
             </button>
             {authMode === "login" && <button onClick={() => setAuthMode("forgot")} className="w-full mt-3 text-sm text-gray-400">Forgot password?</button>}
             {(authMode === "forgot" || authMode === "reset" || authMode === "verify") && <button onClick={() => setAuthMode("login")} className="w-full mt-3 text-sm text-gray-400">Back</button>}
-            {authMsg && <p className={`mt-3 text-sm text-center ${authMsg.includes("success") || authMsg.includes("sent") || authMsg.includes("created") || authMsg.includes("updated") ? "text-green-400" : "text-red-400"}`}>{authMsg}</p>}
+            {authMsg && <p className={`mt-3 text-sm text-center ${authMsg.includes("sent") || authMsg.includes("created") || authMsg.includes("updated") ? "text-green-400" : "text-red-400"}`}>{authMsg}</p>}
           </div>
         </div>
       </div>
     );
   }
 
-  // DASHBOARD
   return (
     <div className="flex h-screen bg-gray-950 text-gray-100 relative">
       {sidebarOpen && <div className="fixed inset-0 bg-black/60 z-40 md:hidden" onClick={() => setSidebarOpen(false)} />}
@@ -447,6 +515,19 @@ export default function DashboardPage() {
                 <Card title="Storage" value={health?.storage || "—"} />
                 <Card title="Version" value={health?.version || "—"} />
               </div>
+              {usage && (
+                <div className="mb-6">
+                  <h2 className="text-sm text-gray-400 mb-3">Usage</h2>
+                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+                    <Card title="Projects" value={`${usage.projects} / ${usage.limits?.projects ?? 10}`} />
+                    <Card title="App users" value={usage.app_users} />
+                    <Card title="Buckets" value={usage.buckets} />
+                    <Card title="Functions" value={usage.functions} />
+                    <Card title="Domains" value={usage.domains} />
+                    <Card title="API calls (24h)" value={usage.api_calls_24h} />
+                  </div>
+                </div>
+              )}
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
                 <pre className="text-xs text-gray-400 overflow-auto">{JSON.stringify(health, null, 2)}</pre>
               </div>
@@ -456,7 +537,7 @@ export default function DashboardPage() {
           {active === "projects" && (
             <div>
               <h1 className="text-xl font-semibold mb-2">Projects</h1>
-              <p className="text-gray-400 text-sm mb-4">Like Supabase projects — each app gets its own API key and Auth providers</p>
+              <p className="text-gray-400 text-sm mb-4">Each app gets its own API key and Auth providers</p>
               {!selectedProject ? (
                 <>
                   <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4 max-w-md">
@@ -478,9 +559,11 @@ export default function DashboardPage() {
                 <div>
                   <button onClick={() => setSelectedProject(null)} className="text-sm text-gray-400 mb-4">← Back</button>
                   <h2 className="font-semibold mb-1">{selectedProject.name}</h2>
-                  <p className="text-xs font-mono text-violet-400 mb-4 break-all">{selectedProject.api_key}</p>
+                  <p className="text-xs font-mono text-violet-400 mb-2 break-all">{selectedProject.api_key}</p>
+                  <button onClick={regenerateKey} className="mb-4 px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs">Regenerate API key</button>
+                  {regenMsg && <p className="mb-4 text-sm text-yellow-400 break-all">{regenMsg}</p>}
                   <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4">
-                    <h3 className="font-medium mb-3 text-sm">Auth Providers (your own keys — like Supabase)</h3>
+                    <h3 className="font-medium mb-3 text-sm">Auth Providers (your keys)</h3>
                     <input placeholder="Google Client ID" value={authConfig.google_client_id} onChange={e => setAuthConfig({ ...authConfig, google_client_id: e.target.value })} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 mb-2 text-sm" />
                     <input placeholder="Google Client Secret" value={authConfig.google_client_secret} onChange={e => setAuthConfig({ ...authConfig, google_client_secret: e.target.value })} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 mb-2 text-sm" />
                     <input placeholder="GitHub Client ID" value={authConfig.github_client_id} onChange={e => setAuthConfig({ ...authConfig, github_client_id: e.target.value })} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 mb-2 text-sm" />
@@ -510,7 +593,7 @@ export default function DashboardPage() {
           {active === "auth" && (
             <div>
               <h1 className="text-xl font-semibold mb-2">Authentication</h1>
-              <p className="text-gray-400 text-sm mb-4">Providers for apps built on KotahBase (configure per project under Projects)</p>
+              <p className="text-gray-400 text-sm mb-4">Configure providers per project under Projects</p>
               <div className="space-y-3 max-w-lg">
                 {["Email + Password + OTP", "Google OAuth (per project)", "GitHub OAuth (per project)", "Forgot / Reset password"].map(f => (
                   <div key={f} className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 flex justify-between items-center">
@@ -525,27 +608,33 @@ export default function DashboardPage() {
           {active === "users" && (
             <div>
               <h1 className="text-xl font-semibold mb-4">Users</h1>
-              <p className="text-gray-400 text-sm">Dashboard owners are platform users. App end-users live under each Project → open a project to see them.</p>
+              <p className="text-gray-400 text-sm">App end-users live under each Project. Open a project to see them.</p>
             </div>
           )}
 
           {active === "tables" && (
             <div>
               <h1 className="text-xl font-semibold mb-2">Tables</h1>
-              <p className="text-gray-400 text-sm mb-4">One-click packs or create your own</p>
+              <p className="text-gray-400 text-sm mb-4">One-click packs, seed data, or create your own</p>
               <div className="grid sm:grid-cols-2 gap-3 mb-6">
                 <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
                   <div className="font-medium mb-1">Social Media Pack</div>
                   <div className="text-xs text-gray-500 mb-3">profiles, posts, likes, comments, follows, messages, notifications</div>
-                  <button onClick={() => installPack("social")} className="px-3 py-1.5 bg-violet-600 rounded-lg text-sm">Install</button>
+                  <div className="flex gap-2">
+                    <button onClick={() => installPack("social")} className="px-3 py-1.5 bg-violet-600 rounded-lg text-sm">Install</button>
+                    <button onClick={() => seedPack("social")} className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm">Seed data</button>
+                  </div>
                 </div>
                 <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
                   <div className="font-medium mb-1">Games Pack</div>
                   <div className="text-xs text-gray-500 mb-3">players, scores, rooms, inventory</div>
-                  <button onClick={() => installPack("game")} className="px-3 py-1.5 bg-violet-600 rounded-lg text-sm">Install</button>
+                  <div className="flex gap-2">
+                    <button onClick={() => installPack("game")} className="px-3 py-1.5 bg-violet-600 rounded-lg text-sm">Install</button>
+                    <button onClick={() => seedPack("game")} className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm">Seed data</button>
+                  </div>
                 </div>
               </div>
-              {tableMsg && <p className="text-sm text-yellow-400 mb-4">{tableMsg}</p>}
+              {(tableMsg || seedMsg) && <p className="text-sm text-yellow-400 mb-4">{tableMsg || seedMsg}</p>}
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4 max-w-lg">
                 <div className="text-sm font-medium mb-2">Create table</div>
                 <input placeholder="table_name" value={newTableName} onChange={e => setNewTableName(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 mb-2 text-sm font-mono" />
@@ -563,6 +652,41 @@ export default function DashboardPage() {
               <div className="flex flex-wrap gap-2">
                 {tables.map(t => <span key={t} className="px-3 py-1.5 bg-gray-900 border border-gray-800 rounded-lg text-sm font-mono text-violet-400">{t}</span>)}
               </div>
+            </div>
+          )}
+
+          {active === "data" && (
+            <div>
+              <h1 className="text-xl font-semibold mb-2">Data browser</h1>
+              <p className="text-gray-400 text-sm mb-4">View and insert rows without writing SQL</p>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {tables.map(t => (
+                  <button key={t} onClick={() => loadTableData(t)} className={`px-3 py-1.5 rounded-lg text-sm font-mono ${dataTable === t ? "bg-violet-600" : "bg-gray-900 border border-gray-800 text-violet-400"}`}>{t}</button>
+                ))}
+              </div>
+              {dataLoading && <p className="text-sm text-gray-400">Loading...</p>}
+              {dataRows && !dataRows.error && (
+                <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden mb-4">
+                  <div className="px-3 py-2 text-xs text-gray-500">{dataRows.total} total · showing {dataRows.rows?.length}</div>
+                  <div className="overflow-x-auto">
+                    {dataRows.rows?.length > 0 && (
+                      <table className="w-full text-sm">
+                        <thead><tr>{dataRows.fields?.map((f: string) => <th key={f} className="text-left px-3 py-1 text-xs text-gray-400">{f}</th>)}</tr></thead>
+                        <tbody>{dataRows.rows.map((r: any, i: number) => <tr key={i} className="border-t border-gray-800">{dataRows.fields?.map((f: string) => <td key={f} className="px-3 py-1 font-mono text-xs max-w-[120px] truncate">{String(r[f] ?? "")}</td>)}</tr>)}</tbody>
+                      </table>
+                    )}
+                  </div>
+                </div>
+              )}
+              {dataRows?.error && <p className="text-red-400 text-sm mb-4">{dataRows.error}</p>}
+              {dataTable && (
+                <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 max-w-lg">
+                  <div className="text-sm font-medium mb-2">Insert into {dataTable}</div>
+                  <textarea value={insertJson} onChange={e => setInsertJson(e.target.value)} rows={4} className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 font-mono text-xs mb-2" />
+                  <button onClick={insertRow} className="px-4 py-2 bg-violet-600 rounded-lg text-sm">Insert row</button>
+                  {insertMsg && <p className="mt-2 text-sm text-yellow-400">{insertMsg}</p>}
+                </div>
+              )}
             </div>
           )}
 
@@ -698,9 +822,9 @@ export default function DashboardPage() {
           {active === "ai" && (
             <div>
               <h1 className="text-xl font-semibold mb-2">AI / Vector</h1>
-              <p className="text-gray-400 text-sm mb-4">Store documents and search (for AI apps)</p>
+              <p className="text-gray-400 text-sm mb-4">Store documents and search</p>
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4 max-w-lg">
-                <textarea placeholder="Document text to store..." value={aiContent} onChange={e => setAiContent(e.target.value)} rows={3} className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm mb-2" />
+                <textarea placeholder="Document text..." value={aiContent} onChange={e => setAiContent(e.target.value)} rows={3} className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm mb-2" />
                 <button onClick={storeEmbedding} className="px-4 py-2 bg-violet-600 rounded-lg text-sm">Store</button>
                 {aiMsg && <p className="mt-2 text-sm text-green-400">{aiMsg}</p>}
               </div>
@@ -715,6 +839,31 @@ export default function DashboardPage() {
                 {aiList.map((item: any) => (
                   <div key={item.id} className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 text-sm truncate">{item.content}</div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {active === "webhooks" && (
+            <div>
+              <h1 className="text-xl font-semibold mb-2">Webhooks</h1>
+              <p className="text-gray-400 text-sm mb-4">Get HTTP callbacks when events happen</p>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4 max-w-lg">
+                <input placeholder="https://your-app.com/webhook" value={whUrl} onChange={e => setWhUrl(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 mb-2 text-sm" />
+                <input placeholder="events (comma-separated)" value={whEvents} onChange={e => setWhEvents(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 mb-3 text-sm" />
+                <button onClick={createWebhook} className="px-4 py-2 bg-violet-600 rounded-lg text-sm">Create webhook</button>
+                {whMsg && <p className="mt-2 text-sm text-yellow-400 break-all">{whMsg}</p>}
+              </div>
+              <div className="space-y-2">
+                {webhooks.map(w => (
+                  <div key={w.id} className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 flex justify-between items-start gap-2">
+                    <div className="min-w-0">
+                      <div className="text-sm font-mono truncate">{w.url}</div>
+                      <div className="text-xs text-gray-500 mt-1">{Array.isArray(w.events) ? w.events.join(", ") : String(w.events)}</div>
+                    </div>
+                    <button onClick={() => deleteWebhook(w.id)} className="text-xs text-red-400 shrink-0">Delete</button>
+                  </div>
+                ))}
+                {webhooks.length === 0 && <p className="text-gray-500 text-sm">No webhooks yet</p>}
               </div>
             </div>
           )}
@@ -768,7 +917,7 @@ export default function DashboardPage() {
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 max-w-lg space-y-3 text-sm">
                 <div><div className="text-gray-400">API</div><div className="font-mono text-xs break-all">{API_URL}</div></div>
                 <div><div className="text-gray-400">Email</div><div>{user.email}</div></div>
-                <div><div className="text-gray-400">Version</div><div>{health?.version || "0.8.1"}</div></div>
+                <div><div className="text-gray-400">Version</div><div>{health?.version || "0.9.0"}</div></div>
                 <div><div className="text-gray-400">Storage</div><div>Naijacloud (Port Harcourt, Nigeria)</div></div>
               </div>
             </div>
