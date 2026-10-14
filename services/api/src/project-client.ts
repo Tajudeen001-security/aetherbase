@@ -21,10 +21,6 @@ function createToken(payload: object, expiresIn = "7d") {
   return jwt.sign(payload, JWT_SECRET, { expiresIn } as any);
 }
 
-function generateOTP() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
-
 /** Resolve project from apikey header or path ref */
 export async function resolveProject(ref: string, apikey: string | undefined) {
   if (!apikey) return null;
@@ -52,17 +48,17 @@ export function makeKeys() {
 
 export const projectClientRoutes = new Hono();
 
-// Middleware: attach project from :ref + apikey
-projectClientRoutes.use("/:ref/*", async (c, next) => {
+async function projectMw(c: any, next: any) {
   const ref = c.req.param("ref");
   const apikey = c.req.header("apikey") || c.req.header("x-api-key") || "";
   const project = await resolveProject(ref, apikey);
   if (!project) return c.json({ error: "Invalid project ref or apikey" }, 401);
-  (c as any).set("project", project);
+  c.set("project", project);
   await next();
-});
+}
+projectClientRoutes.use("/:ref", projectMw);
+projectClientRoutes.use("/:ref/*", projectMw);
 
-// Project info (like supabase settings)
 projectClientRoutes.get("/:ref", async (c) => {
   const project = (c as any).get("project");
   return c.json({
@@ -84,7 +80,6 @@ projectClientRoutes.get("/:ref/", async (c) => {
   });
 });
 
-// ---------- Auth for app users (scoped to this project) ----------
 projectClientRoutes.post("/:ref/auth/v1/signup", async (c) => {
   try {
     const project = (c as any).get("project");
@@ -160,7 +155,6 @@ projectClientRoutes.get("/:ref/auth/v1/user", async (c) => {
   }
 });
 
-// ---------- REST API (table access via apikey) ----------
 projectClientRoutes.get("/:ref/rest/v1/:table", async (c) => {
   try {
     const table = c.req.param("table");
@@ -227,7 +221,6 @@ projectClientRoutes.delete("/:ref/rest/v1/:table", async (c) => {
   }
 });
 
-// ---------- Realtime channel hint ----------
 projectClientRoutes.get("/:ref/realtime/v1", (c) => {
   const project = (c as any).get("project");
   return c.json({
