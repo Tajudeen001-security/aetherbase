@@ -30,6 +30,7 @@ export default function Page() {
   const [sqlBusy, setSqlBusy] = useState(false);
   const [tables, setTables] = useState<string[]>([]);
   const [health, setHealth] = useState<any>(null);
+  const [usage, setUsage] = useState<any>(null);
   const [authCfg, setAuthCfg] = useState<any>(null);
   const [authUsers, setAuthUsers] = useState<any[]>([]);
   const [authSaveMsg, setAuthSaveMsg] = useState("");
@@ -113,6 +114,21 @@ export default function Page() {
     if (tab === "tables" || tab === "sql") api("/tables").then(({ res, data }) => { if (res.ok) setTables(data); });
     if (tab === "authentication" && project?.id) loadAuth(project.id);
   }, [tab, token, view, project?.id]);
+
+  useEffect(() => {
+    if (!token || view !== "app" || !project?.id) return;
+    let active = true;
+    const loadUsage = async () => {
+      try {
+        const res = await fetch(`${API_URL}/projects/${project.id}/metrics`, { headers: { Authorization: `Bearer ${token}` } });
+        const data = await res.json().catch(() => null);
+        if (active && res.ok) setUsage(data);
+      } catch { if (active) setUsage(null); }
+    };
+    loadUsage();
+    const timer = setInterval(loadUsage, 15000);
+    return () => { active = false; clearInterval(timer); };
+  }, [project?.id, token, view]);
 
   async function loadAuth(projectId: string) {
     const { res, data } = await api(`/projects/${projectId}/auth`);
@@ -327,11 +343,26 @@ export default function Page() {
         </div>
         <main className="flex-1 overflow-auto p-4 md:p-6 pb-16 md:pb-6">
           {tab === "overview" && (
-            <div><h1 className="text-lg font-medium mb-4">{project?.name}</h1>
-              <div className="grid sm:grid-cols-2 gap-3">
-                <div className="border border-zinc-800 rounded-lg p-4 text-sm"><div className="text-xs text-zinc-500">Status</div>{health?.status || "—"}</div>
-                <div className="border border-zinc-800 rounded-lg p-4 text-sm"><div className="text-xs text-zinc-500">Database</div>{health?.database || "—"}</div>
-              </div></div>
+            <div className="max-w-6xl">
+              <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-7">
+                <div><p className="text-xs uppercase tracking-[.18em] text-emerald-300 mb-2">Project overview</p><h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">{project?.name}</h1><p className="mt-2 text-sm text-zinc-500">A live view of your backend activity.</p></div>
+                <div className="text-xs text-zinc-500 border border-white/[0.09] rounded-lg px-3 py-2"><span className={health?.status === "healthy" ? "text-emerald-300" : "text-amber-300"}>● </span>{health?.status === "healthy" ? "Platform API online" : "API status not confirmed"}</div>
+              </div>
+              <section className="grid sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
+                <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-5"><div className="text-xs text-zinc-500">API requests</div><div className="mt-3 text-3xl font-semibold tracking-tight">{usage ? Number(usage.requests).toLocaleString() : "—"}</div><div className="mt-2 text-[11px] text-zinc-600">Since API restart</div></div>
+                <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-5"><div className="text-xs text-zinc-500">Successful requests</div><div className="mt-3 text-3xl font-semibold tracking-tight text-emerald-300">{usage ? Number(usage.successful).toLocaleString() : "—"}</div><div className="mt-2 text-[11px] text-zinc-600">HTTP 2xx–3xx</div></div>
+                <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-5"><div className="text-xs text-zinc-500">Failed requests</div><div className="mt-3 text-3xl font-semibold tracking-tight text-rose-300">{usage ? Number(usage.failed).toLocaleString() : "—"}</div><div className="mt-2 text-[11px] text-zinc-600">HTTP 4xx–5xx</div></div>
+                <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-5"><div className="text-xs text-zinc-500">Response egress</div><div className="mt-3 text-3xl font-semibold tracking-tight">{usage ? Number(usage.egressMB).toLocaleString() : "—"}<span className="text-sm font-normal text-zinc-500 ml-1">MB</span></div><div className="mt-2 text-[11px] text-zinc-600">Measured response payloads</div></div>
+              </section>
+              <div className="grid lg:grid-cols-[1.3fr_1fr] gap-4">
+                <section className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5 sm:p-6">
+                  <div className="flex items-center justify-between mb-5"><h2 className="font-medium">Project connection</h2><button onClick={() => setTab("api")} className="text-xs text-emerald-300 hover:text-emerald-200">View API keys →</button></div>
+                  <div className="text-xs text-zinc-500 mb-2">Project API URL</div><div className="flex items-start gap-3"><code className="min-w-0 flex-1 break-all text-sm text-zinc-200">{project?.url || "URL will appear when project reference is available"}</code><button onClick={() => project?.url && copy(project.url, "overview-url")} className="shrink-0 text-xs text-emerald-300">{copied === "overview-url" ? "Copied" : "Copy"}</button></div>
+                  <div className="mt-5 pt-5 border-t border-white/[0.07] grid sm:grid-cols-2 gap-4"><div><div className="text-xs text-zinc-500 mb-1">Database</div><div className="text-sm">{health?.database || "Checking connection…"}</div></div><div><div className="text-xs text-zinc-500 mb-1">Object storage</div><div className="text-sm">{health?.storage || "Checking connection…"}</div></div></div>
+                </section>
+                <section className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5 sm:p-6"><h2 className="font-medium mb-4">Usage meter</h2><p className="text-sm leading-6 text-zinc-400">Request counts and response egress are measured for this project’s API routes. This beta meter is held in API memory and resets when the service restarts; it is not yet a billing-grade quota counter.</p><div className="mt-5 pt-4 border-t border-white/[0.07] text-xs text-zinc-500">Last project request: {usage?.lastRequestAt ? new Date(usage.lastRequestAt).toLocaleString() : "No requests recorded yet"}</div></section>
+              </div>
+            </div>
           )}
           {tab === "api" && project && (
             <div className="max-w-2xl">
