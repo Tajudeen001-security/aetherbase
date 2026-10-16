@@ -1,5 +1,18 @@
 import { Hono } from "hono";
-import { query } from "./db/client";
+import { query, queryProject } from "./db/client";
+import jwt from "jsonwebtoken";
+
+const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === "production" ? "" : "kotahbase-dev-secret-change-me");
+async function getOwnerProject(authHeader: string | undefined, projectId: string) {
+  if (!authHeader?.startsWith("Bearer ") || !projectId) return null;
+  try {
+    const payload = jwt.verify(authHeader.split(" ")[1], JWT_SECRET) as any;
+    const user = await query("SELECT id FROM users WHERE id = $1", [payload.sub]);
+    if (!user.rows.length) return null;
+    const project = await query("SELECT id FROM projects WHERE id = $1 AND owner_id = $2", [projectId, user.rows[0].id]);
+    return project.rows[0] || null;
+  } catch { return null; }
+}
 
 export const schemaRoutes = new Hono();
 
@@ -127,6 +140,10 @@ schemaRoutes.get("/packs", (c) => {
 schemaRoutes.post("/packs/:id", async (c) => {
   try {
     const id = c.req.param("id");
+    const body = await c.req.json();
+    const projectId = String(body.project_id || "");
+    const owned = await getOwnerProject(c.req.header("Authorization"), projectId);
+    if (!owned) return c.json({ error: "Project not found or not authorized" }, 404);
     let sql = "";
     if (id === "social") sql = SOCIAL_SQL;
     else if (id === "game") sql = GAME_SQL;
@@ -136,7 +153,7 @@ schemaRoutes.post("/packs/:id", async (c) => {
     const statements = sql.split(";").map(s => s.trim()).filter(s => s.length > 10);
     const created: string[] = [];
     for (const stmt of statements) {
-      await query(stmt);
+      await queryProject(projectId, stmt);
       const match = stmt.match(/CREATE TABLE IF NOT EXISTS (\w+)/i);
       if (match) created.push(match[1]);
     }
