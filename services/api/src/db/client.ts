@@ -26,3 +26,22 @@ export async function query(text: string, params?: any[]) {
     client.release();
   }
 }
+
+
+/**
+ * Run customer SQL only inside that customer's dedicated schema.
+ * The schema name is derived from the immutable project UUID, never user input.
+ * No public-schema fallback is allowed, preventing cross-project table access.
+ */
+export async function queryProject(projectId: string, sql: string, params?: any[]) {
+  if (!/^[0-9a-f-]{36}$/i.test(projectId)) throw new Error("Invalid project id");
+  const schema = `kb_${projectId.replace(/-/g, "").toLowerCase()}`;
+  const client = await pool.connect();
+  try {
+    await client.query(`SET search_path TO "${schema}"`);
+    return await client.query(sql, params);
+  } finally {
+    try { await client.query("RESET search_path"); } catch {}
+    client.release();
+  }
+}
