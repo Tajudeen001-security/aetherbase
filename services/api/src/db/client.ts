@@ -42,16 +42,22 @@ export async function queryProject(projectId: string, sql: string, params?: any[
   if (/\b(public|pg_catalog|information_schema|kb_[a-f0-9]+)\s*\./i.test(normalizedSql)) {
     throw new Error("Schema-qualified access is blocked; use tables in this project schema only");
   }
-  if (/\b(set\s+search_path|reset\s+search_path|create\s+schema|drop\s+schema|alter\s+system|create\s+role|alter\s+role|drop\s+role|grant\s|revoke\s|copy\s|create\s+extension|do\s+\$)/i.test(normalizedSql)) {
+  if (/\b(set\s+search_path|reset\s+search_path|set_config\s*\(|current_setting\s*\(|begin\s*(;|$)|start\s+transaction|commit\s*(;|$)|rollback\s*(;|$)|savepoint\s|release\s+savepoint|create\s+schema|drop\s+schema|alter\s+system|create\s+role|alter\s+role|drop\s+role|grant\s|revoke\s|copy\s|create\s+extension|do\s+\$)/i.test(normalizedSql)) {
     throw new Error("This SQL operation is not allowed in the project editor");
   }
   const schema = `kb_${projectId.replace(/-/g, "").toLowerCase()}`;
   const client = await pool.connect();
   try {
-    await client.query(`SET search_path TO "${schema}"`);
-    return await client.query(sql, params);
+    // Transaction-local search_path prevents pooled-session state leaking across projects.
+    await client.query("BEGIN");
+    await client.query(`SET LOCAL search_path TO "${schema}"`);
+    const result = await client.query(sql, params);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    try { await client.query("ROLLBACK"); } catch {}
+    throw error;
   } finally {
-    try { await client.query("RESET search_path"); } catch {}
     client.release();
   }
 }
