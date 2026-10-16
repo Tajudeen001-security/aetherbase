@@ -306,7 +306,7 @@ async function projectMw(c: any, next: any) {
   c.set("project", project);
   await next();
   const bytes = await c.res.clone().arrayBuffer().then((body: ArrayBuffer) => body.byteLength).catch(() => 0);
-  await recordProjectUsage(project.id, c.res.status, bytes);
+  await recordProjectUsage(project.id, c.res.status, bytes, c.req.method, path, Date.now() - startedAt);
 }
 
 
