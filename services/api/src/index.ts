@@ -3,7 +3,7 @@ import { cors } from "hono/cors";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { v4 as uuidv4 } from "uuid";
-import { query } from "./db/client";
+import { query, queryProject } from "./db/client";
 import { hasS3 } from "./storage";
 import { sendOTPEmail } from "./email";
 import dotenv from "dotenv";
@@ -14,7 +14,7 @@ import { schemaRoutes } from "./schemas";
 import { extraRoutes, ensureExtraTables } from "./extras";
 import { projectClientRoutes, makeKeys, projectUrl } from "./project-client";
 import { mountAuthSettings, ensureAuthColumns } from "./auth-settings";
-import { getProjectUsage } from "./usage";
+import { getProjectUsage, getProjectLogs, ensureUsageTables } from "./usage";
 
 dotenv.config();
 const app = new Hono();
@@ -164,7 +164,14 @@ app.post("/projects", async (c) => {
     if ((await query("SELECT id FROM projects WHERE LOWER(name) = LOWER($1)", [name])).rows.length) return c.json({ error: "Name taken" }, 400);
     const id = uuidv4();
     const { ref, anon_key, service_role_key } = makeKeys();
-    await query("INSERT INTO projects (id, name, password, owner_id, api_key, ref, anon_key, service_role_key) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)", [id, name, await bcrypt.hash(password, 10), user.id, service_role_key, ref, anon_key, service_role_key]);
+    const schema = "kb_" + id.replace(/-/g, "");
+    await query(`CREATE SCHEMA "${schema}"`);
+    try {
+      await query("INSERT INTO projects (id, name, password, owner_id, api_key, ref, anon_key, service_role_key) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)", [id, name, await bcrypt.hash(password, 10), user.id, service_role_key, ref, anon_key, service_role_key]);
+    } catch (error) {
+      await query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+      throw error;
+    }
     return c.json({ id, name, ref, url: projectUrl(ref), anon_key, service_role_key, api_key: service_role_key }, 201);
   } catch (err: any) { return c.json({ error: err.message }, 500); }
 });
@@ -172,7 +179,7 @@ app.post("/projects", async (c) => {
 app.get("/projects", async (c) => {
   const user = await getUserFromToken(c.req.header("Authorization"));
   if (!user) return c.json({ error: "Not authenticated" }, 401);
-  const res = await query("SELECT id, name, api_key, ref, anon_key, service_role_key, created_at FROM projects WHERE owner_id = $1 ORDER BY created_at DESC", [user.id]);
+  const res = await query("SELECT id, name, ref, created_at FROM projects WHERE owner_id = $1 ORDER BY created_at DESC", [user.id]);
   return c.json(res.rows.map((r: any) => ({ ...r, url: r.ref ? projectUrl(r.ref) : null })));
 });
 
@@ -181,7 +188,25 @@ app.get("/projects/:id/metrics", async (c) => {
   if (!user) return c.json({ error: "Not authenticated" }, 401);
   const project = await query("SELECT id FROM projects WHERE id = $1 AND owner_id = $2", [c.req.param("id"), user.id]);
   if (!project.rows.length) return c.json({ error: "Not found" }, 404);
-  return c.json(getProjectUsage(c.req.param("id")));
+  return c.json(await getProjectUsage(c.req.param("id")));
+});
+
+app.get("/projects/:id/logs", async (c) => {
+  const user = await getUserFromToken(c.req.header("Authorization"));
+  if (!user) return c.json({ error: "Not authenticated" }, 401);
+  const projectId = c.req.param("id");
+  const owned = await query("SELECT id FROM projects WHERE id = $1 AND owner_id = $2", [projectId, user.id]);
+  if (!owned.rows.length) return c.json({ error: "Not found" }, 404);
+  const limit = Math.min(200, Math.max(1, Number(c.req.query("limit") || 100)));
+  return c.json(await getProjectLogs(projectId, limit));
+});
+
+app.get("/projects/:id/keys", async (c) => {
+  const user = await getUserFromToken(c.req.header("Authorization"));
+  if (!user) return c.json({ error: "Not authenticated" }, 401);
+  const res = await query("SELECT id, ref, anon_key, service_role_key FROM projects WHERE id = $1 AND owner_id = $2", [c.req.param("id"), user.id]);
+  if (!res.rows.length) return c.json({ error: "Not found" }, 404);
+  return c.json(res.rows[0]);
 });
 
 mountAuthSettings(app, getUserFromToken);
@@ -197,20 +222,25 @@ app.get("/projects/:id/users", async (c) => {
 app.get("/tables", async (c) => {
   const user = await getUserFromToken(c.req.header("Authorization"));
   if (!user) return c.json({ error: "Not authenticated" }, 401);
-  return c.json((await query(`SELECT table_name FROM information_schema.tables WHERE table_schema='public' ORDER BY table_name`)).rows.map((r: any) => r.table_name));
+  const projectId = c.req.query("project_id") || "";
+  const owned = await query("SELECT id FROM projects WHERE id = $1 AND owner_id = $2", [projectId, user.id]);
+  if (!owned.rows.length) return c.json({ error: "Project not found" }, 404);
+  return c.json((await queryProject(projectId, `SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() ORDER BY table_name`)).rows.map((r: any) => r.table_name));
 });
 
 app.post("/sql", async (c) => {
   try {
     const user = await getUserFromToken(c.req.header("Authorization"));
     if (!user) return c.json({ error: "Not authenticated" }, 401);
-    const { query: sqlQuery } = await c.req.json();
-    if (!sqlQuery) return c.json({ error: "query required" }, 400);
+    const { query: sqlQuery, project_id: projectId } = await c.req.json();
+    if (!sqlQuery || !projectId) return c.json({ error: "query and project_id required" }, 400);
+    const owned = await query("SELECT id FROM projects WHERE id = $1 AND owner_id = $2", [projectId, user.id]);
+    if (!owned.rows.length) return c.json({ error: "Project not found" }, 404);
     const lower = sqlQuery.toLowerCase();
     for (const b of ["drop database", "drop schema", "truncate", "alter system"]) {
       if (lower.includes(b)) return c.json({ error: `Blocked: ${b}` }, 403);
     }
-    const result = await query(sqlQuery);
+    const result = await queryProject(projectId, sqlQuery);
     return c.json({ success: true, rows: result.rows || [], rowCount: result.rowCount, fields: result.fields?.map((f: any) => f.name) || [] });
   } catch (err: any) { return c.json({ success: false, error: err.message }, 400); }
 });
@@ -228,6 +258,12 @@ async function ensureTables() {
     } catch (e: any) { console.log("[migrate]", e.message); }
     await ensureAuthColumns();
     await ensureExtraTables();
+    await ensureUsageTables();
+    const existingProjects = await query("SELECT id FROM projects");
+    for (const project of existingProjects.rows) {
+      const schema = "kb_" + String(project.id).replace(/-/g, "");
+      await query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
+    }
     console.log("[DB] v0.11.0 ready");
   } catch (err: any) { console.error("[DB]", err.message); }
 }
