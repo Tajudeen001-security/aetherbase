@@ -174,7 +174,7 @@ app.post("/projects", async (c) => {
       await query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
       throw error;
     }
-    return c.json({ id, name, ref, url: projectUrl(ref), anon_key, service_role_key, api_key: service_role_key }, 201);
+    return c.json({ id, name: projectName, ref, url: projectUrl(ref), anon_key, service_role_key, api_key: service_role_key }, 201);
   } catch (err: any) { return c.json({ error: err.message }, 500); }
 });
 
