@@ -11,7 +11,7 @@ import { v4 as uuidv4 } from "uuid";
 import { query, queryProject } from "./db/client";
 import { recordProjectUsage } from "./usage";
 
-const JWT_SECRET = process.env.JWT_SECRET || "kotahbase-dev-secret-change-me";
+const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === "production" ? "" : "kotahbase-dev-secret-change-me");
 const API_URL = process.env.API_URL || "https://kotahbase-api.onrender.com";
 
 function createToken(payload: object, expiresIn = "7d") {
