@@ -35,11 +35,14 @@ DNS plan:
 
 KotahBase now provisions a PostgreSQL schema derived from each project's immutable UUID, routes project REST/SQL/template/embedding operations through a per-project search path, and blocks schema-qualified access in the project SQL editor. Public client keys are denied database CRUD by default until row-level policy support is available. This is an MVP isolation layer—not production-grade tenant isolation by itself. The API still uses a shared database connection role, so database-role separation, strict privilege grants, RLS policy management, migration isolation tests, and adversarial cross-tenant tests remain mandatory before production claims.
 
+Existing legacy tables in PostgreSQL `public` are not automatically migrated into per-project schemas because the old records do not reliably identify a single owning project. Back up legacy data and migrate it explicitly into the correct project schema before deleting or repurposing any old tables.
+
 Target design:
 - One control-plane database for platform accounts, projects, billing/plan metadata, key hashes, and resource mapping.
 - A separate database or safely isolated database/schema per project, chosen after load and operations testing.
 - All project data requests resolve the project reference and API key, then use only that project's database context.
 - Never expose service-role credentials to browser/mobile clients.
+- Encrypt OAuth provider secrets and protect API keys at rest; keep encryption keys outside the database and rotate keys safely.
 - Enforce authorization and row-level access policies server-side; deny access by default.
 - Add migration, backup/restore, deletion, and recovery workflows for project resources.
 - Scope storage objects by project and verify project ownership on every upload, download, and delete.
