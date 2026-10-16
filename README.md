@@ -1,4 +1,4 @@
-# AetherBase
+# KotahBase
 
 **Your app's backend: database, authentication, APIs, and storage — designed for developers in Nigeria and beyond.**
 
@@ -13,8 +13,8 @@
 ## Local Development
 
 ```bash
-git clone https://github.com/Tajudeen001-security/aetherbase.git
-cd aetherbase
+git clone https://github.com/Tajudeen001-security/kotahbase.git
+cd kotahbase
 
 # Start Postgres + MinIO
 cd infra && docker compose up -d
@@ -35,7 +35,7 @@ API → http://localhost:4000
 
 1. Go to https://dashboard.render.com
 2. Click **New** → **Blueprint**
-3. Connect the GitHub repo `Tajudeen001-security/aetherbase`
+3. Connect the GitHub repo `Tajudeen001-security/kotahbase`
 4. Render will read the `render.yaml` file automatically
 5. Add your S3/R2 keys later (or use MinIO temporarily)
 
