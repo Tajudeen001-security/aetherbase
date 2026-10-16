@@ -295,6 +295,25 @@ app.get("/projects/:id/keys", async (c) => {
   return c.json(res.rows[0]);
 });
 
+// Rotate both project keys. The old keys become invalid immediately.
+app.post("/v1/projects/:id/regenerate-key", async (c) => {
+  try {
+    const user = await getUserFromToken(c.req.header("Authorization"));
+    if (!user) return c.json({ error: "Not authenticated" }, 401);
+    const id = c.req.param("id");
+    const anonKey = `kb_anon_${uuidv4().replace(/-/g, "")}`;
+    const serviceKey = `kb_service_${uuidv4().replace(/-/g, "")}`;
+    const updated = await query(
+      "UPDATE projects SET anon_key = $1, service_role_key = $2, api_key = $2 WHERE id = $3 AND owner_id = $4 RETURNING id, ref, anon_key, service_role_key",
+      [anonKey, serviceKey, id, user.id]
+    );
+    if (!updated.rows.length) return c.json({ error: "Not found" }, 404);
+    return c.json(updated.rows[0]);
+  } catch {
+    return c.json({ error: "Key rotation failed" }, 500);
+  }
+});
+
 mountAuthSettings(app, getUserFromToken);
 
 app.get("/projects/:id/users", async (c) => {
