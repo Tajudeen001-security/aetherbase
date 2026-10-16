@@ -1,12 +1,12 @@
-# KotahBase
+# AetherBase
 
-**Simple, cheap backend for apps, websites & games.**
+**Your app's backend: database, authentication, APIs, and storage — designed for developers in Nigeria and beyond.**
 
-### Features ready now
+### Current prototype capabilities
 - Auth → Email + Password + 6-digit code
-- Projects → Name + Project Password + API Key
+- Projects → Create/select projects, project reference, API URL and keys
 - Database → Real Postgres + REST API
-- Storage → File upload (MinIO / S3 compatible)
+- Storage → S3-compatible storage adapter (configure credentials as deployment environment variables)
 
 ---
 
@@ -42,3 +42,10 @@ API → http://localhost:4000
 I already prepared the `render.yaml` for you.
 
 Just tell me when you create the Render service and I will help you finish the environment variables.
+
+
+## Architecture and roadmap
+
+See [Platform Architecture](docs/PLATFORM_ARCHITECTURE.md) for the project lifecycle, domain/DNS plan, usage metrics, security priorities, and the isolation work required before production use.
+
+**Important:** project-level database isolation and durable usage metering are not yet complete. Do not treat the current prototype as a production replacement for Supabase until those controls, credential rotation, backups, and security testing are finished.
