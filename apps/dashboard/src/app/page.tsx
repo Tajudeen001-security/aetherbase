@@ -105,7 +105,7 @@ export default function Page() {
           if (list.length === 0) setView("onboard");
           else { setView("projects"); if (!project) setProject(list[0]); }
         }
-      } catch { setView("app"); }
+      } catch { setAuthErr("Could not load your projects. Check the API connection, then retry."); setView("projects"); }
     })();
   }, [token]);
 
