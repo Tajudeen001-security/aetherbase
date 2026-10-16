@@ -26,7 +26,7 @@ app.route("/p", projectClientRoutes);
 
 if (process.env.NODE_ENV === "production" && !process.env.JWT_SECRET) throw new Error("JWT_SECRET must be configured in production");
 const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === "production" ? "" : "kotahbase-dev-secret-change-me");
-const DASHBOARD_URL = process.env.DASHBOARD_URL || "https://kotahbase-six.vercel.app";
+const DASHBOARD_URL = process.env.DASHBOARD_URL || "https://aetherbase-six.vercel.app";
 const API_URL = process.env.API_URL || "https://kotahbase-api.onrender.com";
 const PLATFORM_GOOGLE_ID = process.env.GOOGLE_CLIENT_ID || "";
 const PLATFORM_GOOGLE_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
