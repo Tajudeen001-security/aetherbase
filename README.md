@@ -3,10 +3,13 @@
 **Your app's backend: database, authentication, APIs, and storage — designed for developers in Nigeria and beyond.**
 
 ### Current prototype capabilities
-- Auth → Email + Password + 6-digit code
-- Projects → Create/select projects, project reference, API URL and keys
-- Database → Real Postgres + REST API
-- Storage → S3-compatible storage adapter (configure credentials as deployment environment variables)
+- Auth → Email/password verification, Google, GitHub, Discord, and Microsoft/Azure OAuth for project users
+- Projects → Create/select/delete projects, project reference, key rotation, and project API URL
+- Database → PostgreSQL schema per project, SQL editor, REST-style CRUD (public-key CRUD denied until RLS policies exist), and social/game starter schemas
+- Storage → Project-scoped S3-compatible object storage, signed downloads, upload/list/delete controls
+- Observability → Persistent per-project API request counts, response egress estimates, status codes, latency, and request logs
+- Realtime → Project-authenticated WebSocket connections with project-scoped rooms
+- AI utilities → Project-scoped embeddings and text search
 
 ---
 
