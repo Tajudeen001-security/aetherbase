@@ -74,6 +74,12 @@ export async function getProjectUsage(projectId: string) {
     requests: 0, successful: 0, failed: 0, egress_bytes: 0, last_request_at: null
   }) as UsageRow;
   const egressBytes = Number(row.egress_bytes || 0);
+  const [codes, latency] = await Promise.all([
+    query("SELECT status_code, COUNT(*)::bigint AS count FROM project_request_logs WHERE project_id = $1 GROUP BY status_code ORDER BY status_code", [projectId]),
+    query("SELECT COALESCE(AVG(duration_ms), 0)::float AS avg_ms, COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms), 0)::float AS p95_ms FROM project_request_logs WHERE project_id = $1", [projectId])
+  ]);
+  const statusCodes: Record<string, number> = {};
+  for (const item of codes.rows) statusCodes[String(item.status_code)] = Number(item.count || 0);
   return {
     requests: Number(row.requests || 0),
     successful: Number(row.successful || 0),
@@ -81,6 +87,9 @@ export async function getProjectUsage(projectId: string) {
     egressBytes,
     egressMB: Number((egressBytes / (1024 * 1024)).toFixed(3)),
     lastRequestAt: row.last_request_at,
+    statusCodes,
+    avgLatencyMs: Number(latency.rows[0]?.avg_ms || 0).toFixed(1),
+    p95LatencyMs: Number(latency.rows[0]?.p95_ms || 0).toFixed(1),
     persistent: true,
     window: "all_time_since_metering_enabled"
   };
