@@ -423,9 +423,11 @@ projectClientRoutes.post("/:ref/auth/v1/signup", async (c) => {
   try {
     const project = (c as any).get("project");
     if (project.enable_email === false) return c.json({ error: "Email auth disabled" }, 403);
-    const { email, password } = await c.req.json();
-    if (!email || !password) return c.json({ error: "email and password required" }, 400);
-    if (password.length < 6) return c.json({ error: "Password min 6 chars" }, 400);
+    const body = await c.req.json();
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    const password = typeof body.password === "string" ? body.password : "";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return c.json({ error: "Enter a valid email address" }, 400);
+    if (password.length < 8 || password.length > 128) return c.json({ error: "Password must be between 8 and 128 characters" }, 400);
     const existing = await query(
       "SELECT id FROM app_users WHERE project_id = $1 AND email = $2",
       [project.id, email.toLowerCase()]
@@ -458,11 +460,13 @@ projectClientRoutes.post("/:ref/auth/v1/login", async (c) => {
   try {
     const project = (c as any).get("project");
     if (project.enable_email === false) return c.json({ error: "Email auth disabled" }, 403);
-    const { email, password } = await c.req.json();
-    if (!email || !password) return c.json({ error: "email and password required" }, 400);
+    const body = await c.req.json();
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    const password = typeof body.password === "string" ? body.password : "";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !password || password.length > 128) return c.json({ error: "Enter valid credentials" }, 400);
     const res = await query(
       "SELECT * FROM app_users WHERE project_id = $1 AND email = $2",
-      [project.id, email.toLowerCase()]
+      [project.id, email]
     );
     if (res.rows.length === 0) return c.json({ error: "Invalid credentials" }, 401);
     const user = res.rows[0];
