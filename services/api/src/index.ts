@@ -225,7 +225,7 @@ app.get("/tables", async (c) => {
   const projectId = c.req.query("project_id") || "";
   const owned = await query("SELECT id FROM projects WHERE id = $1 AND owner_id = $2", [projectId, user.id]);
   if (!owned.rows.length) return c.json({ error: "Project not found" }, 404);
-  return c.json((await queryProject(projectId, `SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() ORDER BY table_name`)).rows.map((r: any) => r.table_name));
+  return c.json((await queryProject(projectId, `SELECT tablename AS table_name FROM pg_tables WHERE schemaname = current_schema() ORDER BY tablename`)).rows.map((r: any) => r.table_name));
 });
 
 app.post("/sql", async (c) => {
