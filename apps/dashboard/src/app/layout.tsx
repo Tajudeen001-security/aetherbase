@@ -3,8 +3,8 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
-  title: "KotahBase Dashboard",
-  description: "Backend platform for apps, websites & games"
+  title: "AetherBase — Backend Platform",
+  description: "Build, connect, and scale your apps with AetherBase"
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
