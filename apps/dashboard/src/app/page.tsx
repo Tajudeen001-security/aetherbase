@@ -295,18 +295,26 @@ export default function Page() {
 
   if (view === "onboard") {
     return (
-      <div className="min-h-screen bg-[#0c0c0c] flex items-center justify-center p-4">
-        <div className="w-full max-w-md">
-          <h1 className="text-xl text-white font-semibold mb-1">Create your first project</h1>
-          <p className="text-zinc-500 text-sm mb-6">URL + anon key + service role key like Supabase.</p>
-          <div className="border border-zinc-800 rounded-lg p-5 space-y-4">
-            <input value={pName} onChange={e => setPName(e.target.value)} placeholder="Project name" className="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-sm text-white outline-none" />
-            <input type="password" value={pPass} onChange={e => setPPass(e.target.value)} placeholder="Project password" className="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-sm text-white outline-none" />
-            <button disabled={pBusy} onClick={createProject} className="w-full py-2.5 rounded-md bg-emerald-500 text-black text-sm font-medium disabled:opacity-50">{pBusy ? "Creating…" : "Create project"}</button>
-            {pMsg && <p className="text-sm text-red-400">{pMsg}</p>}
+      <div className="min-h-screen bg-[#080b09] text-white relative overflow-hidden flex flex-col">
+        <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[700px] h-[500px] rounded-full bg-emerald-400/[0.06] blur-[140px] pointer-events-none" />
+        <header className="relative border-b border-white/[0.08] px-5 sm:px-8 py-4 flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-emerald-400 text-[#07100b] grid place-items-center font-black">a</div><span className="font-semibold tracking-tight">AetherBase</span>
+          {projects.length > 0 && <button onClick={() => setView("projects")} className="ml-auto text-xs text-zinc-400 hover:text-white">← All projects</button>}
+          <button onClick={clearSession} className={projects.length > 0 ? "text-xs text-zinc-500 hover:text-white" : "ml-auto text-xs text-zinc-500 hover:text-white"}>Sign out</button>
+        </header>
+        <main className="relative flex-1 grid place-items-center px-5 py-12">
+          <div className="w-full max-w-2xl">
+            <div className="text-center mb-8"><div className="mx-auto w-14 h-14 rounded-2xl border border-emerald-300/20 bg-emerald-300/[0.08] text-emerald-200 grid place-items-center text-2xl">✳</div><p className="mt-6 text-xs uppercase tracking-[.22em] text-emerald-300">{projects.length ? "New workspace" : "Let's get you started"}</p><h1 className="mt-3 text-3xl sm:text-4xl font-semibold tracking-[-.045em]">{projects.length ? "Create another project" : "Create your first project"}</h1><p className="mt-3 text-sm leading-6 text-zinc-400 max-w-lg mx-auto">Give your app a home. AetherBase will create a project reference and connection keys you can use to connect your website, mobile app, or game.</p></div>
+            <div className="rounded-2xl border border-white/[0.1] bg-[#0d110f]/90 shadow-2xl shadow-black/30 p-5 sm:p-7">
+              <label className="block text-xs font-medium text-zinc-300 mb-2">Project name</label><input value={pName} onChange={e => setPName(e.target.value)} placeholder="e.g. my-storefront" autoComplete="off" className="w-full h-12 rounded-xl border border-white/[0.1] bg-black/30 px-4 text-sm text-white placeholder:text-zinc-600 outline-none focus:border-emerald-300/60 focus:ring-4 focus:ring-emerald-300/[0.06] transition" />
+              <label className="block text-xs font-medium text-zinc-300 mt-5 mb-2">Project password</label><input type="password" value={pPass} onChange={e => setPPass(e.target.value)} placeholder="Create a project password" autoComplete="new-password" className="w-full h-12 rounded-xl border border-white/[0.1] bg-black/30 px-4 text-sm text-white placeholder:text-zinc-600 outline-none focus:border-emerald-300/60 focus:ring-4 focus:ring-emerald-300/[0.06] transition" />
+              <p className="mt-3 text-[11px] leading-5 text-zinc-500">Use a strong password and keep your secret service key private. Project credentials are different from your AetherBase account password.</p>
+              {pMsg && <p role="alert" className="mt-4 rounded-lg border border-rose-300/20 bg-rose-300/[0.06] px-3 py-2.5 text-sm text-rose-200">{pMsg}</p>}
+              <button disabled={pBusy} onClick={createProject} className="mt-5 w-full h-12 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-[#07100b] font-semibold text-sm transition disabled:opacity-50">{pBusy ? "Creating your project…" : "Create project →"}</button>
+            </div>
+            <div className="mt-5 grid sm:grid-cols-3 gap-3">{[["01","Unique project reference"],["02","API URL + client key"],["03","Private server key"]].map(([n,label])=><div key={n} className="rounded-xl border border-white/[0.07] bg-white/[0.02] px-3 py-3 flex items-center gap-3"><span className="text-xs font-mono text-emerald-300">{n}</span><span className="text-xs text-zinc-400">{label}</span></div>)}</div>
           </div>
-          <button onClick={clearSession} className="mt-4 text-xs text-zinc-600">Sign out</button>
-        </div>
+        </main>
       </div>
     );
   }
