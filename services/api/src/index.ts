@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { v4 as uuidv4 } from "uuid";
 import { query, queryProject } from "./db/client";
-import { hasS3 } from "./storage";
+import { hasS3, uploadFile, listFiles, getFileUrl, deleteFile } from "./storage";
 import { sendOTPEmail } from "./email";
 import dotenv from "dotenv";
 import { createServer } from "http";
@@ -191,6 +191,58 @@ app.get("/projects/:id/metrics", async (c) => {
   return c.json(await getProjectUsage(c.req.param("id")));
 });
 
+app.get("/projects/:id/storage", async (c) => {
+  const user = await getUserFromToken(c.req.header("Authorization"));
+  if (!user) return c.json({ error: "Not authenticated" }, 401);
+  const projectId = c.req.param("id");
+  const owned = await query("SELECT id FROM projects WHERE id = $1 AND owner_id = $2", [projectId, user.id]);
+  if (!owned.rows.length) return c.json({ error: "Not found" }, 404);
+  if (!hasS3) return c.json({ error: "Storage provider is not configured" }, 503);
+  const items = await listFiles(projectId + "/");
+  return c.json(items.map((item: any) => ({ key: item.key, size: item.size, lastModified: item.lastModified })));
+});
+
+app.post("/projects/:id/storage", async (c) => {
+  try {
+    const user = await getUserFromToken(c.req.header("Authorization"));
+    if (!user) return c.json({ error: "Not authenticated" }, 401);
+    const projectId = c.req.param("id");
+    const owned = await query("SELECT id FROM projects WHERE id = $1 AND owner_id = $2", [projectId, user.id]);
+    if (!owned.rows.length) return c.json({ error: "Not found" }, 404);
+    if (!hasS3) return c.json({ error: "Storage provider is not configured" }, 503);
+    const form = await c.req.formData();
+    const file = form.get("file");
+    if (!(file instanceof File)) return c.json({ error: "file is required" }, 400);
+    if (file.size < 1 || file.size > 25 * 1024 * 1024) return c.json({ error: "File must be between 1 byte and 25 MB" }, 413);
+    const filename = file.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120) || "upload.bin";
+    const key = projectId + "/" + uuidv4() + "-" + filename;
+    await uploadFile(key, Buffer.from(await file.arrayBuffer()), file.type || "application/octet-stream");
+    return c.json({ key, name: filename, size: file.size, contentType: file.type || "application/octet-stream", url: await getFileUrl(key) }, 201);
+  } catch (error: any) { return c.json({ error: error.message || "Upload failed" }, 500); }
+});
+
+app.get("/projects/:id/storage/url", async (c) => {
+  const user = await getUserFromToken(c.req.header("Authorization"));
+  if (!user) return c.json({ error: "Not authenticated" }, 401);
+  const projectId = c.req.param("id");
+  const owned = await query("SELECT id FROM projects WHERE id = $1 AND owner_id = $2", [projectId, user.id]);
+  if (!owned.rows.length) return c.json({ error: "Not found" }, 404);
+  const key = c.req.query("key") || "";
+  if (!key.startsWith(projectId + "/") || key.split("/").some((part) => part === "..")) return c.json({ error: "Invalid object key" }, 400);
+  try { return c.json({ url: await getFileUrl(key) }); } catch (error: any) { return c.json({ error: error.message || "Could not create download URL" }, 400); }
+});
+
+app.delete("/projects/:id/storage", async (c) => {
+  const user = await getUserFromToken(c.req.header("Authorization"));
+  if (!user) return c.json({ error: "Not authenticated" }, 401);
+  const projectId = c.req.param("id");
+  const owned = await query("SELECT id FROM projects WHERE id = $1 AND owner_id = $2", [projectId, user.id]);
+  if (!owned.rows.length) return c.json({ error: "Not found" }, 404);
+  const body = await c.req.json().catch(() => ({}));
+  const key = String(body.key || "");
+  if (!key.startsWith(projectId + "/") || key.split("/").some((part) => part === "..")) return c.json({ error: "Invalid object key" }, 400);
+  try { await deleteFile(key); return c.json({ success: true }); } catch (error: any) { return c.json({ error: error.message || "Delete failed" }, 400); }
+});
 app.get("/projects/:id/logs", async (c) => {
   const user = await getUserFromToken(c.req.header("Authorization"));
   if (!user) return c.json({ error: "Not authenticated" }, 401);
