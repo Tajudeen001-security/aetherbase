@@ -542,6 +542,8 @@ export default function Page() {
               <button onClick={runSql} disabled={sqlBusy} className="px-4 py-2 bg-emerald-500 text-black text-sm font-medium rounded-md">{sqlBusy ? "…" : "Run"}</button>
               {sqlOut?.error && <p className="mt-3 text-red-400 text-sm">{sqlOut.error}</p>}
               {sqlOut?.rows && <p className="mt-3 text-xs text-zinc-500">{sqlOut.rowCount ?? sqlOut.rows.length} rows</p>}
+              {Array.isArray(sqlOut?.rows) && sqlOut.rows.length > 0 && <div className="mt-4 overflow-x-auto rounded-xl border border-zinc-800"><table className="w-full text-left text-xs"><thead className="bg-zinc-900"><tr>{(sqlOut.fields || Object.keys(sqlOut.rows[0])).map((field:string)=><th key={field} className="px-3 py-2 font-medium text-zinc-400">{field}</th>)}</tr></thead><tbody>{sqlOut.rows.slice(0,100).map((row:any,index:number)=><tr key={index} className="border-t border-zinc-800">{(sqlOut.fields || Object.keys(row)).map((field:string)=><td key={field} className="px-3 py-2 max-w-[280px] truncate font-mono text-zinc-300">{row[field] == null ? "NULL" : typeof row[field] === "object" ? JSON.stringify(row[field]) : String(row[field])}</td>)}</tr>)}</tbody></table></div>}
+              {sqlOut?.success && sqlOut.rows?.length === 0 && <p className="mt-3 text-sm text-emerald-300">Query completed successfully.</p>}
             </div>
           )}
           {tab === "logs" && (
