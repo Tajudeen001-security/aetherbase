@@ -287,6 +287,7 @@ projectClientRoutes.get("/:ref/auth/v1/callback/github", async (c) => {
 });
 
 async function projectMw(c: any, next: any) {
+  const startedAt = Date.now();
   const path = c.req.path || "";
   const ref = c.req.param("ref");
   // OAuth browser redirects do not carry an API key; still meter them against their project.
@@ -295,7 +296,7 @@ async function projectMw(c: any, next: any) {
     await next();
     if (project) {
       const bytes = await c.res.clone().arrayBuffer().then((body: ArrayBuffer) => body.byteLength).catch(() => 0);
-      await recordProjectUsage(project.id, c.res.status, bytes);
+      await recordProjectUsage(project.id, c.res.status, bytes, c.req.method, path, Date.now() - startedAt);
     }
     return;
   }
