@@ -255,6 +255,23 @@ app.get("/projects/:id/logs", async (c) => {
   return c.json(await getProjectLogs(projectId, limit));
 });
 
+app.delete("/projects/:id", async (c) => {
+  try {
+    const user = await getUserFromToken(c.req.header("Authorization"));
+    if (!user) return c.json({ error: "Not authenticated" }, 401);
+    const projectId = c.req.param("id");
+    const owned = await query("SELECT id FROM projects WHERE id = $1 AND owner_id = $2", [projectId, user.id]);
+    if (!owned.rows.length) return c.json({ error: "Not found" }, 404);
+    if (hasS3) {
+      const objects = await listFiles(projectId + "/");
+      for (const object of objects) if (object.key) await deleteFile(object.key);
+    }
+    const schema = "kb_" + projectId.replace(/-/g, "").toLowerCase();
+    await query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+    await query("DELETE FROM projects WHERE id = $1 AND owner_id = $2", [projectId, user.id]);
+    return c.json({ success: true });
+  } catch (error: any) { return c.json({ error: error.message || "Project deletion failed" }, 500); }
+});
 app.get("/projects/:id/keys", async (c) => {
   const user = await getUserFromToken(c.req.header("Authorization"));
   if (!user) return c.json({ error: "Not authenticated" }, 401);
