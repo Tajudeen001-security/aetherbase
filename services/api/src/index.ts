@@ -46,7 +46,7 @@ async function getUserFromToken(authHeader: string | undefined) {
 
 app.get("/", (c) => c.json({ name: "KotahBase API", version: "0.11.0", status: "ok" }));
 app.get("/health", async (c) => {
-  try { await query("SELECT 1"); return c.json({ status: "healthy", database: "connected", storage: hasS3 ? "connected" : "off", version: "0.11.0" }); }
+  try { await query("SELECT 1"); return c.json({ status: "healthy", database: "connected", storage: hasS3 ? "configured" : "not_configured", version: "0.11.0" }); }
   catch (err: any) { return c.json({ status: "unhealthy", error: err.message }, 500); }
 });
 
@@ -356,29 +356,41 @@ ensureTables().then(() => {
   });
   const wss = new WebSocketServer({ server, path: "/realtime/v1" });
   wss.on("connection", (ws) => {
-    let currentRoom = "global";
+    let currentRoom = "";
     let clientId = uuidv4().slice(0, 8);
-    if (!rooms.has(currentRoom)) rooms.set(currentRoom, new Set());
-    rooms.get(currentRoom)!.add(ws);
-    ws.send(JSON.stringify({ type: "connected", clientId, room: currentRoom }));
-    broadcast(currentRoom, { type: "presence", event: "join", clientId }, ws);
-    ws.on("message", (raw) => {
+    let projectId: string | null = null;
+    const authTimer = setTimeout(() => { if (!projectId) ws.close(1008, "Authenticate with project ref and API key"); }, 5000);
+    ws.send(JSON.stringify({ type: "auth_required", timeoutMs: 5000 }));
+    ws.on("message", async (raw) => {
       try {
         const msg = JSON.parse(raw.toString());
+        if (!projectId) {
+          if (msg.type !== "auth" || !msg.ref || !msg.apikey) { ws.close(1008, "Authentication required"); return; }
+          const project = await resolveProject(String(msg.ref), String(msg.apikey));
+          if (!project) { ws.close(1008, "Invalid project credentials"); return; }
+          projectId = project.id;
+          currentRoom = `${projectId}:global`;
+          clearTimeout(authTimer);
+          if (!rooms.has(currentRoom)) rooms.set(currentRoom, new Set());
+          rooms.get(currentRoom)!.add(ws);
+          ws.send(JSON.stringify({ type: "authenticated", clientId, room: "global" }));
+          broadcast(currentRoom, { type: "presence", event: "join", clientId }, ws);
+          return;
+        }
         if (msg.type === "join" && msg.room) {
           rooms.get(currentRoom)?.delete(ws);
           broadcast(currentRoom, { type: "presence", event: "leave", clientId });
-          currentRoom = String(msg.room).slice(0, 64);
+          currentRoom = `${projectId}:${String(msg.room).slice(0, 64)}`;
           if (!rooms.has(currentRoom)) rooms.set(currentRoom, new Set());
           rooms.get(currentRoom)!.add(ws);
-          ws.send(JSON.stringify({ type: "joined", room: currentRoom }));
+          ws.send(JSON.stringify({ type: "joined", room: String(msg.room).slice(0, 64) }));
           broadcast(currentRoom, { type: "presence", event: "join", clientId }, ws);
         }
-        if (msg.type === "broadcast") broadcast(currentRoom, { type: "broadcast", from: clientId, payload: msg.payload, room: currentRoom }, ws);
+        if (msg.type === "broadcast" && projectId) broadcast(currentRoom, { type: "broadcast", from: clientId, payload: msg.payload, room: currentRoom.split(":").slice(1).join(":") }, ws);
         if (msg.type === "ping") ws.send(JSON.stringify({ type: "pong" }));
       } catch {}
     });
-    ws.on("close", () => { rooms.get(currentRoom)?.delete(ws); broadcast(currentRoom, { type: "presence", event: "leave", clientId }); });
+    ws.on("close", () => { clearTimeout(authTimer); if (currentRoom) { rooms.get(currentRoom)?.delete(ws); broadcast(currentRoom, { type: "presence", event: "leave", clientId }); } });
   });
   server.listen(port, () => console.log("KotahBase v0.11.0 — auth providers + redirects"));
 });
