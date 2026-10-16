@@ -118,6 +118,15 @@ export default function Page() {
   }, [tab, token, view, project?.id]);
 
   useEffect(() => {
+    if (!token || view !== "app" || !project?.id || project.anon_key) return;
+    let active = true;
+    api(`/projects/${project.id}/keys`).then(({ res, data }) => {
+      if (active && res.ok) setProject((current: any) => current?.id === project.id ? { ...current, ...data, url: current.url || `${API_URL}/p/${data.ref}` } : current);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [token, view, project?.id, project?.anon_key]);
+
+  useEffect(() => {
     if (!token || view !== "app" || !project?.id) return;
     let active = true;
     const loadUsage = async () => {
