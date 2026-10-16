@@ -8,7 +8,7 @@ import { Hono } from "hono";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { v4 as uuidv4 } from "uuid";
-import { query } from "./db/client";
+import { query, queryProject } from "./db/client";
 import { recordProjectUsage } from "./usage";
 
 const JWT_SECRET = process.env.JWT_SECRET || "kotahbase-dev-secret-change-me";
@@ -431,10 +431,11 @@ projectClientRoutes.get("/:ref/auth/v1/settings", async (c) => {
 
 projectClientRoutes.get("/:ref/rest/v1/:table", async (c) => {
   try {
+    const project = (c as any).get("project");
     const table = c.req.param("table");
     if (!/^[a-z][a-z0-9_]*$/.test(table)) return c.json({ error: "Invalid table" }, 400);
     const limit = Math.min(Number(c.req.query("limit") || 100), 1000);
-    const res = await query(`SELECT * FROM ${table} LIMIT $1`, [limit]);
+    const res = await queryProject(project.id, `SELECT * FROM ${table} LIMIT $1`, [limit]);
     return c.json(res.rows);
   } catch (err: any) {
     return c.json({ error: err.message }, 400);
@@ -443,6 +444,7 @@ projectClientRoutes.get("/:ref/rest/v1/:table", async (c) => {
 
 projectClientRoutes.post("/:ref/rest/v1/:table", async (c) => {
   try {
+    const project = (c as any).get("project");
     const table = c.req.param("table");
     if (!/^[a-z][a-z0-9_]*$/.test(table)) return c.json({ error: "Invalid table" }, 400);
     const body = await c.req.json();
@@ -451,7 +453,7 @@ projectClientRoutes.post("/:ref/rest/v1/:table", async (c) => {
     const cols = keys.join(", ");
     const placeholders = keys.map((_, i) => `$${i + 1}`).join(", ");
     const values = keys.map((k) => body[k]);
-    const res = await query(
+    const res = await queryProject(project.id,
       `INSERT INTO ${table} (${cols}) VALUES (${placeholders}) RETURNING *`,
       values
     );
@@ -463,6 +465,7 @@ projectClientRoutes.post("/:ref/rest/v1/:table", async (c) => {
 
 projectClientRoutes.patch("/:ref/rest/v1/:table", async (c) => {
   try {
+    const project = (c as any).get("project");
     const table = c.req.param("table");
     if (!/^[a-z][a-z0-9_]*$/.test(table)) return c.json({ error: "Invalid table" }, 400);
     const body = await c.req.json();
@@ -472,8 +475,8 @@ projectClientRoutes.patch("/:ref/rest/v1/:table", async (c) => {
     if (!keys.length) return c.json({ error: "No fields to update" }, 400);
     const sets = keys.map((k, i) => `${k} = $${i + 1}`).join(", ");
     const values = [...keys.map((k) => body[k]), id];
-    const res = await query(
-      `UPDATE ${table} SET ${sets} WHERE id = $${keys.length + 1} RETURNING *`,
+    const res = await queryProject(project.id,
+      `UPDATE ${table} SET ${sets} WHERE id = ${keys.length + 1} RETURNING *`,
       values
     );
     return c.json(res.rows[0] || { error: "Not found" });
@@ -484,11 +487,12 @@ projectClientRoutes.patch("/:ref/rest/v1/:table", async (c) => {
 
 projectClientRoutes.delete("/:ref/rest/v1/:table", async (c) => {
   try {
+    const project = (c as any).get("project");
     const table = c.req.param("table");
     if (!/^[a-z][a-z0-9_]*$/.test(table)) return c.json({ error: "Invalid table" }, 400);
     const id = c.req.query("id");
     if (!id) return c.json({ error: "id query required" }, 400);
-    await query(`DELETE FROM ${table} WHERE id = $1`, [id]);
+    await queryProject(project.id, `DELETE FROM ${table} WHERE id = $1`, [id]);
     return c.json({ success: true });
   } catch (err: any) {
     return c.json({ error: err.message }, 400);
