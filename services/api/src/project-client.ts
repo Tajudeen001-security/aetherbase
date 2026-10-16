@@ -478,6 +478,7 @@ projectClientRoutes.get("/:ref/auth/v1/settings", async (c) => {
 projectClientRoutes.get("/:ref/rest/v1/:table", async (c) => {
   try {
     const project = (c as any).get("project");
+    if (project.role !== "service_role") return c.json({ error: "Database access is denied by default for public keys until row-level policies are configured. Use a server-only service key for trusted server requests." }, 403);
     const table = c.req.param("table");
     if (!/^[a-z][a-z0-9_]*$/.test(table)) return c.json({ error: "Invalid table" }, 400);
     const limit = Math.min(Number(c.req.query("limit") || 100), 1000);
@@ -491,6 +492,7 @@ projectClientRoutes.get("/:ref/rest/v1/:table", async (c) => {
 projectClientRoutes.post("/:ref/rest/v1/:table", async (c) => {
   try {
     const project = (c as any).get("project");
+    if (project.role !== "service_role") return c.json({ error: "Database access is denied by default for public keys until row-level policies are configured. Use a server-only service key for trusted server requests." }, 403);
     const table = c.req.param("table");
     if (!/^[a-z][a-z0-9_]*$/.test(table)) return c.json({ error: "Invalid table" }, 400);
     const body = await c.req.json();
@@ -512,6 +514,7 @@ projectClientRoutes.post("/:ref/rest/v1/:table", async (c) => {
 projectClientRoutes.patch("/:ref/rest/v1/:table", async (c) => {
   try {
     const project = (c as any).get("project");
+    if (project.role !== "service_role") return c.json({ error: "Database access is denied by default for public keys until row-level policies are configured. Use a server-only service key for trusted server requests." }, 403);
     const table = c.req.param("table");
     if (!/^[a-z][a-z0-9_]*$/.test(table)) return c.json({ error: "Invalid table" }, 400);
     const body = await c.req.json();
@@ -534,6 +537,7 @@ projectClientRoutes.patch("/:ref/rest/v1/:table", async (c) => {
 projectClientRoutes.delete("/:ref/rest/v1/:table", async (c) => {
   try {
     const project = (c as any).get("project");
+    if (project.role !== "service_role") return c.json({ error: "Database access is denied by default for public keys until row-level policies are configured. Use a server-only service key for trusted server requests." }, 403);
     const table = c.req.param("table");
     if (!/^[a-z][a-z0-9_]*$/.test(table)) return c.json({ error: "Invalid table" }, 400);
     const id = c.req.query("id");
