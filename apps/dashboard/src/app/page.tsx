@@ -59,18 +59,37 @@ export default function Page() {
     (async () => {
       const params = new URLSearchParams(window.location.search);
       const tFromUrl = params.get("token");
+      const oauthError = params.get("error");
+      if (oauthError) {
+        const messages: Record<string, string> = {
+          google_no_code: "Google sign-in was cancelled or returned no authorization code.",
+          google_token: "Google could not complete sign-in. Check the OAuth client ID, secret and callback URL.",
+          google_no_email: "Google did not return an email address for this account.",
+          google_failed: "Google sign-in failed. Please try again.",
+          github_no_code: "GitHub sign-in was cancelled or returned no authorization code.",
+          github_token: "GitHub could not complete sign-in. Check the OAuth app configuration.",
+          github_no_email: "GitHub did not return an email address for this account.",
+          github_failed: "GitHub sign-in failed. Please try again."
+        };
+        setAuthErr(messages[oauthError] || "Sign-in could not be completed. Please try again.");
+        window.history.replaceState({}, "", window.location.pathname);
+      }
       if (tFromUrl) { window.history.replaceState({}, "", window.location.pathname); localStorage.setItem(TOKEN_KEY, tFromUrl); }
       const t = tFromUrl || localStorage.getItem(TOKEN_KEY);
+      try {
+        const healthRes = await fetch(`${API_URL}/health`);
+        const healthData = await healthRes.json().catch(() => ({}));
+        setHealth(healthData);
+      } catch { setHealth({ status: "offline" }); }
       if (!t) { setBoot(false); return; }
       try {
         const res = await fetch(`${API_URL}/auth/v1/user`, { headers: { Authorization: `Bearer ${t}` } });
         if (res.status === 401) clearSession();
         else if (res.ok) { const u = await res.json(); setToken(t); setUser(u); localStorage.setItem(TOKEN_KEY, t); }
-        else setToken(t);
-      } catch { setToken(t); }
+        else { localStorage.removeItem(TOKEN_KEY); setAuthErr("We couldn't validate your session. Please sign in again."); }
+      } catch { setAuthErr("The AetherBase API is unreachable. Check the API deployment and try again."); }
       setBoot(false);
     })();
-    fetch(`${API_URL}/health`).then(r => r.json()).then(setHealth).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -177,41 +196,52 @@ export default function Page() {
 
   if (!token || view === "auth") {
     return (
-      <div className="min-h-screen bg-[#0c0c0c] flex items-center justify-center p-4">
-        <div className="w-full max-w-[380px]">
-          <div className="mb-8 text-center">
-            <div className="inline-flex items-center gap-2 mb-3">
-              <div className="w-8 h-8 rounded-md bg-emerald-500 flex items-center justify-center text-black font-bold text-sm">K</div>
-              <span className="text-white font-semibold text-lg">KotahBase</span>
-            </div>
-            <p className="text-zinc-500 text-sm">Backend for your apps</p>
+      <div className="min-h-screen bg-[#090b0a] text-white flex">
+        <section className="hidden lg:flex lg:w-[52%] relative overflow-hidden border-r border-white/[0.08] flex-col justify-between p-12 xl:p-16">
+          <div className="absolute inset-0 pointer-events-none" style={{backgroundImage:"linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px, transparent 1px)",backgroundSize:"48px 48px"}} />
+          <div className="absolute -top-32 -left-20 w-[520px] h-[520px] rounded-full bg-emerald-500/[0.09] blur-[120px]" />
+          <div className="relative flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-emerald-400 text-[#07100b] grid place-items-center font-black text-lg">a</div>
+            <span className="text-[17px] font-semibold tracking-tight">AetherBase</span>
+            <span className="ml-2 text-[10px] uppercase tracking-[.18em] text-zinc-500 border border-white/10 rounded px-2 py-1">Developer platform</span>
           </div>
-          <div className="border border-zinc-800 rounded-lg bg-zinc-900/50 p-6">
-            <div className="flex border-b border-zinc-800 mb-5 -mx-6 px-6">
-              <button onClick={() => { setMode("login"); setAuthErr(""); }} className={`pb-3 mr-4 text-sm ${mode === "login" ? "text-white border-b-2 border-emerald-500" : "text-zinc-500"}`}>Sign in</button>
-              <button onClick={() => { setMode("signup"); setAuthErr(""); }} className={`pb-3 text-sm ${mode === "signup" || mode === "verify" ? "text-white border-b-2 border-emerald-500" : "text-zinc-500"}`}>Sign up</button>
+          <div className="relative max-w-xl py-16">
+            <p className="text-xs uppercase tracking-[.22em] text-emerald-300 mb-5">Your backend. Your rules.</p>
+            <h1 className="text-5xl xl:text-6xl leading-[1.08] font-semibold tracking-[-.055em]">Build the product.<br/><span className="text-zinc-500">We’ll handle the backend.</span></h1>
+            <p className="mt-6 max-w-md text-[15px] leading-7 text-zinc-400">A practical home for your app’s data, authentication, APIs and files — built with Nigerian infrastructure in mind.</p>
+            <div className="mt-10 grid grid-cols-3 gap-3">
+              {["Postgres database","User authentication","Object storage"].map((label,i)=><div key={label} className="border border-white/[0.09] bg-white/[0.025] rounded-xl p-3"><div className="text-emerald-300 text-sm mb-3">{["01","02","03"][i]}</div><div className="text-xs text-zinc-300">{label}</div></div>)}
             </div>
-            {mode !== "verify" && (
-              <div className="space-y-3">
-                <div><label className="block text-xs text-zinc-400 mb-1.5">Email</label>
-                  <input type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-sm text-white outline-none focus:border-emerald-500" /></div>
-                <div><label className="block text-xs text-zinc-400 mb-1.5">Password</label>
-                  <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-sm text-white outline-none focus:border-emerald-500" /></div>
-              </div>
-            )}
-            {mode === "verify" && (
-              <div className="space-y-3">
+          </div>
+          <div className="relative flex justify-between text-[11px] text-zinc-600"><span>Built for developers, wherever they are.</span><span>Nigeria · Africa · Everywhere</span></div>
+        </section>
+        <main className="flex-1 flex items-center justify-center px-5 py-10 sm:px-10">
+          <div className="w-full max-w-[390px]">
+            <div className="lg:hidden flex items-center gap-3 mb-10"><div className="w-9 h-9 rounded-xl bg-emerald-400 text-[#07100b] grid place-items-center font-black text-lg">a</div><span className="font-semibold text-lg">AetherBase</span></div>
+            <p className="text-xs uppercase tracking-[.18em] text-emerald-300 mb-3">{mode === "verify" ? "One last step" : "Developer access"}</p>
+            <h2 className="text-[30px] font-semibold tracking-[-.04em]">{mode === "verify" ? "Verify your email" : mode === "signup" ? "Create your account" : "Welcome back"}</h2>
+            <p className="text-sm text-zinc-500 mt-2 mb-8">{mode === "verify" ? "Enter the six-digit code associated with your account." : mode === "signup" ? "Get your project workspace ready in a few steps." : "Sign in to continue to your workspace."}</p>
+            {mode !== "verify" && <div className="grid grid-cols-2 p-1 rounded-lg bg-white/[0.04] border border-white/[0.07] mb-6">
+              <button onClick={() => {setMode("login");setAuthErr("");}} className={`rounded-md py-2.5 text-sm transition ${mode==="login"?"bg-[#202622] text-white shadow-sm":"text-zinc-500 hover:text-zinc-300"}`}>Sign in</button>
+              <button onClick={() => {setMode("signup");setAuthErr("");}} className={`rounded-md py-2.5 text-sm transition ${mode==="signup"?"bg-[#202622] text-white shadow-sm":"text-zinc-500 hover:text-zinc-300"}`}>Create account</button>
+            </div>}
+            <form onSubmit={e=>{e.preventDefault(); if(mode==="login") doLogin(); else if(mode==="signup") doSignup(); else doVerify();}} className="space-y-4">
+              {mode !== "verify" ? <>
+                <div><label className="block text-[12px] text-zinc-300 mb-2">Email address</label><input required autoComplete="email" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" className="w-full h-11 rounded-lg border border-white/[0.12] bg-[#101310] px-3.5 text-sm placeholder:text-zinc-700 outline-none focus:border-emerald-400/70 focus:ring-2 focus:ring-emerald-400/10 transition"/></div>
+                <div><label className="block text-[12px] text-zinc-300 mb-2">Password</label><input required minLength={8} autoComplete={mode==="login"?"current-password":"new-password"} type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="At least 8 characters" className="w-full h-11 rounded-lg border border-white/[0.12] bg-[#101310] px-3.5 text-sm placeholder:text-zinc-700 outline-none focus:border-emerald-400/70 focus:ring-2 focus:ring-emerald-400/10 transition"/></div>
+              </> : <>
                 <p className="text-sm text-zinc-400">Code sent to <span className="text-white">{email}</span></p>
-                {devCode && <p className="text-xs text-amber-400 font-mono">Dev code: {devCode}</p>}
-                <input value={otp} onChange={e => setOtp(e.target.value)} maxLength={6} className="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-sm text-white text-center tracking-[0.4em] outline-none focus:border-emerald-500" />
-              </div>
-            )}
-            <button disabled={authBusy} onClick={mode === "login" ? doLogin : mode === "signup" ? doSignup : doVerify} className="w-full mt-5 py-2.5 rounded-md bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-medium disabled:opacity-50">
-              {authBusy ? "Please wait…" : mode === "login" ? "Sign in" : mode === "signup" ? "Create account" : "Verify email"}
-            </button>
-            {authErr && <p className="mt-3 text-sm text-red-400 text-center">{authErr}</p>}
+                {devCode && <p className="text-xs text-amber-300 border border-amber-300/20 bg-amber-300/[0.06] rounded-lg p-3">Development email delivery is not configured. Temporary code: <strong className="font-mono">{devCode}</strong></p>}
+                <input required inputMode="numeric" pattern="[0-9]{6}" aria-label="Six-digit verification code" value={otp} onChange={e=>setOtp(e.target.value.replace(/\D/g,"").slice(0,6))} maxLength={6} placeholder="000000" className="w-full h-14 rounded-lg border border-white/[0.12] bg-[#101310] px-3 text-center text-xl tracking-[.5em] font-mono outline-none focus:border-emerald-400/70"/>
+                <button type="button" onClick={()=>{setMode("signup");setOtp("");setAuthErr("");}} className="text-xs text-zinc-500 hover:text-white">Back to account details</button>
+              </>}
+              {authErr && <div role="alert" className="rounded-lg border border-red-400/20 bg-red-400/[0.07] px-3.5 py-3 text-sm leading-5 text-red-300">{authErr}</div>}
+              <button type="submit" disabled={authBusy} className="w-full h-11 rounded-lg bg-emerald-400 hover:bg-emerald-300 text-[#07100b] font-semibold text-sm transition disabled:opacity-50 disabled:cursor-wait">{authBusy?"Please wait…":mode==="login"?"Sign in to AetherBase":mode==="signup"?"Create account":"Verify email"}</button>
+            </form>
+            <div className="mt-7 flex items-center gap-3 text-[11px] text-zinc-600"><span className={`w-1.5 h-1.5 rounded-full ${health?.status==="healthy"?"bg-emerald-400":"bg-amber-400"}`}/>{health?.status==="healthy"?"API is reachable":"API connection not confirmed"}<span className="ml-auto">Secure account access</span></div>
+            <p className="mt-8 text-[11px] leading-5 text-zinc-600">By continuing, you agree to use the platform responsibly. Keep your project secret keys private.</p>
           </div>
-        </div>
+        </main>
       </div>
     );
   }
