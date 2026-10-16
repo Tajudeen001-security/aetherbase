@@ -95,7 +95,7 @@ projectClientRoutes.get("/:ref/auth/v1/authorize/:provider", async (c) => {
   const project = await loadProjectByRef(ref);
   if (!project) return c.json({ error: "Project not found" }, 404);
 
-  const state = Buffer.from(JSON.stringify({ ref, redirect_to: redirectTo || null })).toString("base64url");
+  const state = jwt.sign({ ref, redirect_to: redirectTo || null, purpose: "oauth_state" }, JWT_SECRET, { expiresIn: "10m" });
 
   if (provider === "google") {
     if (project.enable_google === false) return c.json({ error: "Google disabled for this project" }, 403);
@@ -146,9 +146,10 @@ projectClientRoutes.get("/:ref/auth/v1/callback/google", async (c) => {
     const stateRaw = c.req.query("state") || "";
     let redirectTo: string | undefined;
     try {
-      const st = JSON.parse(Buffer.from(stateRaw, "base64url").toString());
+      const st = jwt.verify(stateRaw, JWT_SECRET) as any;
+      if (st.purpose !== "oauth_state" || st.ref !== ref) throw new Error("Invalid OAuth state");
       redirectTo = st.redirect_to || undefined;
-    } catch {}
+    } catch { return c.text("OAuth state is invalid or expired. Please try signing in again.", 400); }
     const project = await loadProjectByRef(ref);
     if (!project || !code || !project.google_client_id || !project.google_client_secret) {
       return c.text("OAuth failed", 400);
@@ -226,9 +227,10 @@ projectClientRoutes.get("/:ref/auth/v1/callback/github", async (c) => {
     const stateRaw = c.req.query("state") || "";
     let redirectTo: string | undefined;
     try {
-      const st = JSON.parse(Buffer.from(stateRaw, "base64url").toString());
+      const st = jwt.verify(stateRaw, JWT_SECRET) as any;
+      if (st.purpose !== "oauth_state" || st.ref !== ref) throw new Error("Invalid OAuth state");
       redirectTo = st.redirect_to || undefined;
-    } catch {}
+    } catch { return c.text("OAuth state is invalid or expired. Please try signing in again.", 400); }
     const project = await loadProjectByRef(ref);
     if (!project || !code || !project.github_client_id || !project.github_client_secret) {
       return c.text("OAuth failed", 400);
@@ -310,7 +312,7 @@ projectClientRoutes.get("/:ref/auth/v1/callback/discord", async (c) => {
     const code = c.req.query("code");
     const stateRaw = c.req.query("state") || "";
     let redirectTo: string | undefined;
-    try { const st = JSON.parse(Buffer.from(stateRaw, "base64url").toString()); redirectTo = st.redirect_to || undefined; } catch {}
+    try { const st = jwt.verify(stateRaw, JWT_SECRET) as any; if (st.purpose !== "oauth_state" || st.ref !== ref) throw new Error("Invalid OAuth state"); redirectTo = st.redirect_to || undefined; } catch { return c.text("OAuth state is invalid or expired. Please try signing in again.", 400); }
     const project = await loadProjectByRef(ref);
     if (!project || project.enable_discord !== true || !project.discord_client_id || !project.discord_client_secret || !code) return c.text("Discord OAuth is not configured or authorization failed", 400);
     const redirectUri = `${API_URL}/p/${ref}/auth/v1/callback/discord`;
@@ -345,7 +347,7 @@ projectClientRoutes.get("/:ref/auth/v1/callback/microsoft", async (c) => {
     const code = c.req.query("code");
     const stateRaw = c.req.query("state") || "";
     let redirectTo: string | undefined;
-    try { const st = JSON.parse(Buffer.from(stateRaw, "base64url").toString()); redirectTo = st.redirect_to || undefined; } catch {}
+    try { const st = jwt.verify(stateRaw, JWT_SECRET) as any; if (st.purpose !== "oauth_state" || st.ref !== ref) throw new Error("Invalid OAuth state"); redirectTo = st.redirect_to || undefined; } catch { return c.text("OAuth state is invalid or expired. Please try signing in again.", 400); }
     const project = await loadProjectByRef(ref);
     if (!project || project.enable_microsoft !== true || !project.microsoft_client_id || !project.microsoft_client_secret || !code) return c.text("Microsoft OAuth is not configured or authorization failed", 400);
     const redirectUri = `${API_URL}/p/${ref}/auth/v1/callback/microsoft`;
