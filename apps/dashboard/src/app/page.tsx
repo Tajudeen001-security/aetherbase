@@ -41,9 +41,9 @@ export default function Page() {
   const [authSaving, setAuthSaving] = useState(false);
   const [form, setForm] = useState({
     site_url: "", redirect_url: "", additional_redirect_urls: "",
-    enable_email: true, enable_google: true, enable_github: true, enable_discord: false,
+    enable_email: true, enable_google: true, enable_github: true, enable_discord: false, enable_microsoft: false,
     google_client_id: "", google_client_secret: "",
-    github_client_id: "", github_client_secret: "", discord_client_id: "", discord_client_secret: ""
+    github_client_id: "", github_client_secret: "", discord_client_id: "", discord_client_secret: "", microsoft_client_id: "", microsoft_client_secret: ""
   });
 
   const saveSession = (t: string, u: any) => { localStorage.setItem(TOKEN_KEY, t); setToken(t); setUser(u); };
@@ -152,9 +152,9 @@ export default function Page() {
       setForm({
         site_url: data.site_url || "", redirect_url: data.redirect_url || "",
         additional_redirect_urls: (data.additional_redirect_urls || []).join("\n"),
-        enable_email: data.enable_email !== false, enable_google: data.enable_google !== false, enable_github: data.enable_github !== false, enable_discord: data.enable_discord === true,
+        enable_email: data.enable_email !== false, enable_google: data.enable_google !== false, enable_github: data.enable_github !== false, enable_discord: data.enable_discord === true, enable_microsoft: data.enable_microsoft === true,
         google_client_id: data.google_client_id || "", google_client_secret: "",
-        github_client_id: data.github_client_id || "", github_client_secret: "", discord_client_id: data.discord_client_id || "", discord_client_secret: ""
+        github_client_id: data.github_client_id || "", github_client_secret: "", discord_client_id: data.discord_client_id || "", discord_client_secret: "", microsoft_client_id: data.microsoft_client_id || "", microsoft_client_secret: ""
       });
     }
     const u = await api(`/projects/${projectId}/users`);
@@ -167,12 +167,13 @@ export default function Page() {
     const body: any = {
       site_url: form.site_url.trim() || null, redirect_url: form.redirect_url.trim() || null,
       additional_redirect_urls: form.additional_redirect_urls.split("\n").map(s => s.trim()).filter(Boolean),
-      enable_email: form.enable_email, enable_google: form.enable_google, enable_github: form.enable_github, enable_discord: form.enable_discord,
-      google_client_id: form.google_client_id.trim(), github_client_id: form.github_client_id.trim(), discord_client_id: form.discord_client_id.trim()
+      enable_email: form.enable_email, enable_google: form.enable_google, enable_github: form.enable_github, enable_discord: form.enable_discord, enable_microsoft: form.enable_microsoft,
+      google_client_id: form.google_client_id.trim(), github_client_id: form.github_client_id.trim(), discord_client_id: form.discord_client_id.trim(), microsoft_client_id: form.microsoft_client_id.trim()
     };
     if (form.google_client_secret.trim()) body.google_client_secret = form.google_client_secret.trim();
     if (form.github_client_secret.trim()) body.github_client_secret = form.github_client_secret.trim();
     if (form.discord_client_secret.trim()) body.discord_client_secret = form.discord_client_secret.trim();
+    if (form.microsoft_client_secret.trim()) body.microsoft_client_secret = form.microsoft_client_secret.trim();
     const { res, data } = await api(`/projects/${project.id}/auth`, { method: "PUT", body: JSON.stringify(body) });
     setAuthSaving(false);
     setAuthSaveMsg(res.ok ? "Saved" : (data.error || "Failed"));
@@ -459,6 +460,12 @@ export default function Page() {
                   <input value={form.discord_client_id} onChange={e => setForm({ ...form, discord_client_id: e.target.value })} placeholder="Discord Application Client ID" className="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-sm text-white outline-none" />
                   <input type="password" value={form.discord_client_secret} onChange={e => setForm({ ...form, discord_client_secret: e.target.value })} placeholder={authCfg?.discord_secret_set ? "Secret set — leave blank to keep" : "Discord Client Secret"} className="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-sm text-white outline-none" />
                   {authCfg?.callback_urls?.discord && <div className="text-[11px] text-zinc-500">Callback (paste in Discord Developer Portal):<div className="font-mono text-zinc-300 break-all mt-1">{authCfg.callback_urls.discord}<button type="button" className="ml-2 text-emerald-400" onClick={() => copy(authCfg.callback_urls.discord, "dcb")}>{copied==="dcb"?"Copied":"Copy"}</button></div></div>}
+                </div>
+                <div className="border-t border-zinc-800 pt-3 space-y-2">
+                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.enable_microsoft} onChange={e => setForm({ ...form, enable_microsoft: e.target.checked })} /> Microsoft / Azure AD</label>
+                  <input value={form.microsoft_client_id} onChange={e => setForm({ ...form, microsoft_client_id: e.target.value })} placeholder="Microsoft Application (client) ID" className="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-sm text-white outline-none" />
+                  <input type="password" value={form.microsoft_client_secret} onChange={e => setForm({ ...form, microsoft_client_secret: e.target.value })} placeholder={authCfg?.microsoft_secret_set ? "Secret set — leave blank to keep" : "Microsoft Client Secret"} className="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-sm text-white outline-none" />
+                  {authCfg?.callback_urls?.microsoft && <div className="text-[11px] text-zinc-500">Callback (paste in Microsoft Entra app registration):<div className="font-mono text-zinc-300 break-all mt-1">{authCfg.callback_urls.microsoft}<button type="button" className="ml-2 text-emerald-400" onClick={() => copy(authCfg.callback_urls.microsoft, "mcb")}>{copied==="mcb"?"Copied":"Copy"}</button></div></div>}
                 </div>
               </section>
               <button disabled={authSaving} onClick={saveAuth} className="px-4 py-2 bg-emerald-500 text-black text-sm font-medium rounded-md disabled:opacity-50">{authSaving ? "Saving…" : "Save auth settings"}</button>
