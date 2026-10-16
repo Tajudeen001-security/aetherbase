@@ -9,6 +9,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { v4 as uuidv4 } from "uuid";
 import { query } from "./db/client";
+import { recordProjectUsage } from "./usage";
 
 const JWT_SECRET = process.env.JWT_SECRET || "kotahbase-dev-secret-change-me";
 const API_URL = process.env.API_URL || "https://kotahbase-api.onrender.com";
@@ -284,16 +285,24 @@ projectClientRoutes.get("/:ref/auth/v1/callback/github", async (c) => {
 
 async function projectMw(c: any, next: any) {
   const path = c.req.path || "";
-  // skip mw for oauth authorize/callback (already handled above)
-  if (path.includes("/auth/v1/authorize/") || path.includes("/auth/v1/callback/")) {
-    return next();
-  }
   const ref = c.req.param("ref");
+  // OAuth browser redirects do not carry an API key; still meter them against their project.
+  if (path.includes("/auth/v1/authorize/") || path.includes("/auth/v1/callback/")) {
+    const project = await loadProjectByRef(ref);
+    await next();
+    if (project) {
+      const bytes = await c.res.clone().arrayBuffer().then((body: ArrayBuffer) => body.byteLength).catch(() => 0);
+      await recordProjectUsage(project.id, c.res.status, bytes);
+    }
+    return;
+  }
   const apikey = c.req.header("apikey") || c.req.header("x-api-key") || "";
   const project = await resolveProject(ref, apikey);
   if (!project) return c.json({ error: "Invalid project ref or apikey" }, 401);
   c.set("project", project);
   await next();
+  const bytes = await c.res.clone().arrayBuffer().then((body: ArrayBuffer) => body.byteLength).catch(() => 0);
+  await recordProjectUsage(project.id, c.res.status, bytes);
 }
 
 projectClientRoutes.use("/:ref", projectMw);
