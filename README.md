@@ -13,7 +13,7 @@
 ## Local Development
 
 ```bash
-git clone https://github.com/Tajudeen001-security/kotahbase.git
+git clone https://github.com/Tajudeen001-security/aetherbase.git
 cd kotahbase
 
 # Start Postgres + MinIO
@@ -35,7 +35,7 @@ API → http://localhost:4000
 
 1. Go to https://dashboard.render.com
 2. Click **New** → **Blueprint**
-3. Connect the GitHub repo `Tajudeen001-security/kotahbase`
+3. Connect the GitHub repo `Tajudeen001-security/aetherbase`
 4. Render will read the `render.yaml` file automatically
 5. Add your S3/R2 keys later (or use MinIO temporarily)
 
@@ -48,4 +48,4 @@ Just tell me when you create the Render service and I will help you finish the e
 
 See [Platform Architecture](docs/PLATFORM_ARCHITECTURE.md) for the project lifecycle, domain/DNS plan, usage metrics, security priorities, and the isolation work required before production use.
 
-**Important:** project-level database isolation and durable usage metering are not yet complete. Do not treat the current prototype as a production replacement for Supabase until those controls, credential rotation, backups, and security testing are finished.
+**Production readiness:** KotahBase now provisions a dedicated PostgreSQL schema for each project, scopes the project REST/SQL paths to that schema, and stores request metrics/logs in PostgreSQL. This is an important MVP boundary, not a substitute for database-role isolation, row-level policies, adversarial tenant-isolation tests, backups/restore drills, and a security review. Rotate the previously exposed storage credentials at the provider immediately; source-code fallbacks have been removed.
