@@ -33,7 +33,7 @@ DNS plan:
 
 ## Project isolation requirement
 
-A project reference and API keys alone do not provide database isolation. Before production claims or paid plans, each project must have isolated data access. The current code still has dashboard database operations that query the shared PostgreSQL `public` schema, so project-level database isolation is an unfinished critical milestone.
+KotahBase now provisions a PostgreSQL schema derived from each project's immutable UUID, routes project REST/SQL/template/embedding operations through a per-project search path, and blocks schema-qualified access in the project SQL editor. Public client keys are denied database CRUD by default until row-level policy support is available. This is an MVP isolation layer—not production-grade tenant isolation by itself. The API still uses a shared database connection role, so database-role separation, strict privilege grants, RLS policy management, migration isolation tests, and adversarial cross-tenant tests remain mandatory before production claims.
 
 Target design:
 - One control-plane database for platform accounts, projects, billing/plan metadata, key hashes, and resource mapping.
@@ -56,11 +56,38 @@ Dashboard metrics should include:
 - Auth signups, logins, verification failures, and OAuth failures.
 - Current service status, uptime, latency percentiles, and rate-limit events.
 
-The initial request meter is process-local beta telemetry and resets when the API restarts. It is useful for validating the dashboard UI, but it is not durable billing-grade usage. Before usage-based billing or quotas, persist usage events/aggregates, define exact byte accounting, prevent duplicate counting, and add retention/aggregation jobs.
+Request counters and request logs are now persisted in PostgreSQL per project, including method, path, status code, response bytes, latency, and timestamp. Egress currently measures API response payload bytes only, not full network transfer, CDN/storage downloads, retries, or all gateway overhead. Before billing or quotas, add idempotent event IDs, aggregation/retention jobs, provider-side storage egress, and reconciliation.
+
+
+## Supabase-style capability map
+
+### Available in the current prototype
+- Account email/password signup and email verification flow.
+- Project picker, project creation, project refs, public/secret key display, and project API URL.
+- PostgreSQL project schemas and SQL editor scoped to a selected project.
+- REST-style CRUD endpoints, currently restricted to the server-only service-role key until RLS policies exist.
+- Authentication providers: email/password, Google OAuth, GitHub OAuth, and Discord OAuth configuration per project.
+- Object storage configuration through deployment environment variables, per-project object prefixes, upload/list/download-signed-URL/delete controls (25 MB dashboard upload cap).
+- Persistent request metrics and request logs.
+- Starter schema packs for social and game data; embeddings/search endpoints scoped to authenticated projects.
+
+### Planned parity features, in priority order
+1. **Database:** visual table editor, columns/types/defaults, foreign keys, indexes, SQL history, migrations, schema diff, import/export CSV/SQL, backups and point-in-time restore.
+2. **Security:** RLS enable/disable and policy builder, role grants, JWT claims, secret-key rotation UI, audit trail, rate limits, abuse detection, tenant-boundary automated tests.
+3. **Authentication:** password reset, email change, magic links, OTP, phone/SMS, sessions and refresh tokens, MFA/TOTP, account linking, invite flow, custom SMTP, OAuth providers for Apple, Microsoft/Azure, Discord, GitLab and others as integrations are implemented and tested.
+4. **Storage:** bucket creation, public/private policy controls, object metadata, resumable multipart uploads, signed uploads/downloads, image transformations, lifecycle rules, per-project quotas and provider egress reporting.
+5. **Realtime:** authenticated WebSocket channels, broadcast, presence, database change streams, topic permissions, reconnection and durable event delivery.
+6. **Server-side compute:** Edge Functions, scheduled jobs/cron, queues, webhooks with signed delivery/retries, secrets management, local CLI and deployment logs.
+7. **AI/vector:** optional pgvector-backed embeddings, indexes, hybrid search, document ingestion, and project-scoped retrieval. Do not require an external AI key for ordinary database/auth/storage functions.
+8. **Observability:** searchable request logs, traces, p50/p95/p99 latency, database slow-query reports, auth/security events, uptime/incident status and alert destinations.
+9. **Developer workflow:** TypeScript/JavaScript SDK, REST/OpenAPI docs, generated database types, local emulator, GitHub integration, preview environments and one-click migration/import tooling.
+10. **Operations:** custom domains, TLS automation, project deletion/export, regional placement, backup verification, usage limits, transparent free/pro tiers and service health reporting.
+
+A feature is not considered complete because a button or route exists: it needs authorization tests, tenant-isolation tests, documented limits, observability, and a verified deployment.
 
 ## Build order
 
-1. **Stability and security:** rotate exposed storage credentials, remove source-code fallbacks, validate login inputs, use deployment environment variables, and align dashboard/API URLs.
+1. **Stability and security:** rotate exposed storage credentials at the provider, remove source-code fallbacks, validate login inputs, use deployment environment variables, and align dashboard/API URLs.
 2. **Project lifecycle:** project picker, create/select project, per-project URL and key display, project deletion and safe key rotation.
 3. **Isolation:** provision per-project database resources and remove shared-schema access from user-facing project operations.
 4. **Observability:** durable per-project usage, request logs, latency/error breakdowns, database and storage telemetry.
