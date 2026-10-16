@@ -13,15 +13,17 @@ export function mountAuthSettings(app: any, getUserFromToken: (h: string | undef
     const id = c.req.param("id");
     const res = await query(
       `SELECT id, name, ref,
-              google_client_id, github_client_id, discord_client_id,
+              google_client_id, github_client_id, discord_client_id, microsoft_client_id,
               CASE WHEN google_client_secret IS NOT NULL AND google_client_secret <> '' THEN true ELSE false END AS google_secret_set,
               CASE WHEN github_client_secret IS NOT NULL AND github_client_secret <> '' THEN true ELSE false END AS github_secret_set,
               CASE WHEN discord_client_secret IS NOT NULL AND discord_client_secret <> '' THEN true ELSE false END AS discord_secret_set,
+              CASE WHEN microsoft_client_secret IS NOT NULL AND microsoft_client_secret <> '' THEN true ELSE false END AS microsoft_secret_set,
               redirect_url, site_url, additional_redirect_urls,
               COALESCE(enable_email, true) AS enable_email,
               COALESCE(enable_google, true) AS enable_google,
               COALESCE(enable_github, true) AS enable_github,
-              COALESCE(enable_discord, false) AS enable_discord
+              COALESCE(enable_discord, false) AS enable_discord,
+              COALESCE(enable_microsoft, false) AS enable_microsoft
        FROM projects WHERE id = $1 AND owner_id = $2`,
       [id, user.id]
     );
@@ -43,21 +45,26 @@ export function mountAuthSettings(app: any, getUserFromToken: (h: string | undef
       enable_google: p.enable_google,
       enable_github: p.enable_github,
       enable_discord: p.enable_discord,
+      enable_microsoft: p.enable_microsoft,
       google_client_id: p.google_client_id || "",
       google_secret_set: p.google_secret_set,
       github_client_id: p.github_client_id || "",
       github_secret_set: p.github_secret_set,
       discord_client_id: p.discord_client_id || "",
       discord_secret_set: p.discord_secret_set,
+      microsoft_client_id: p.microsoft_client_id || "",
+      microsoft_secret_set: p.microsoft_secret_set,
       callback_urls: {
         google: p.ref ? `${projectUrl(p.ref)}/auth/v1/callback/google` : null,
         github: p.ref ? `${projectUrl(p.ref)}/auth/v1/callback/github` : null,
-        discord: p.ref ? `${projectUrl(p.ref)}/auth/v1/callback/discord` : null
+        discord: p.ref ? `${projectUrl(p.ref)}/auth/v1/callback/discord` : null,
+        microsoft: p.ref ? `${projectUrl(p.ref)}/auth/v1/callback/microsoft` : null
       },
       authorize_urls: {
         google: p.ref ? `${projectUrl(p.ref)}/auth/v1/authorize/google` : null,
         github: p.ref ? `${projectUrl(p.ref)}/auth/v1/authorize/github` : null,
-        discord: p.ref ? `${projectUrl(p.ref)}/auth/v1/authorize/discord` : null
+        discord: p.ref ? `${projectUrl(p.ref)}/auth/v1/authorize/discord` : null,
+        microsoft: p.ref ? `${projectUrl(p.ref)}/auth/v1/authorize/microsoft` : null
       }
     });
   });
@@ -82,13 +89,15 @@ export function mountAuthSettings(app: any, getUserFromToken: (h: string | undef
         "github_client_secret",
         "discord_client_id",
         "discord_client_secret",
+        "microsoft_client_id",
+        "microsoft_client_secret",
         "redirect_url",
         "site_url"
       ];
       for (const key of strFields) {
         if (body[key] !== undefined) {
           // empty secret means "don't change" for secrets
-          if ((key === "google_client_secret" || key === "github_client_secret" || key === "discord_client_secret") && body[key] === "") continue;
+          if ((key === "google_client_secret" || key === "github_client_secret" || key === "discord_client_secret" || key === "microsoft_client_secret") && body[key] === "") continue;
           updates.push(`${key} = $${idx++}`);
           values.push(body[key] === "" ? null : body[key]);
         }
@@ -102,7 +111,7 @@ export function mountAuthSettings(app: any, getUserFromToken: (h: string | undef
         values.push(JSON.stringify(arr));
       }
 
-      for (const key of ["enable_email", "enable_google", "enable_github", "enable_discord"]) {
+      for (const key of ["enable_email", "enable_google", "enable_github", "enable_discord", "enable_microsoft"]) {
         if (body[key] !== undefined) {
           updates.push(`${key} = $${idx++}`);
           values.push(!!body[key]);
@@ -128,7 +137,10 @@ export async function ensureAuthColumns() {
     `ALTER TABLE projects ADD COLUMN IF NOT EXISTS enable_github BOOLEAN DEFAULT true`,
     `ALTER TABLE projects ADD COLUMN IF NOT EXISTS discord_client_id TEXT`,
     `ALTER TABLE projects ADD COLUMN IF NOT EXISTS discord_client_secret TEXT`,
-    `ALTER TABLE projects ADD COLUMN IF NOT EXISTS enable_discord BOOLEAN DEFAULT false`
+    `ALTER TABLE projects ADD COLUMN IF NOT EXISTS enable_discord BOOLEAN DEFAULT false`,
+    `ALTER TABLE projects ADD COLUMN IF NOT EXISTS microsoft_client_id TEXT`,
+    `ALTER TABLE projects ADD COLUMN IF NOT EXISTS microsoft_client_secret TEXT`,
+    `ALTER TABLE projects ADD COLUMN IF NOT EXISTS enable_microsoft BOOLEAN DEFAULT false`
   ];
   for (const sql of cols) {
     try {
