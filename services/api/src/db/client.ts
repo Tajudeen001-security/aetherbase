@@ -37,6 +37,9 @@ export async function query(text: string, params?: any[]) {
 export async function queryProject(projectId: string, sql: string, params?: any[]) {
   if (!/^[0-9a-f-]{36}$/i.test(projectId)) throw new Error("Invalid project id");
   const normalizedSql = sql.replace(/["`]/g, "").trim();
+  if (normalizedSql.includes("--") || normalizedSql.includes("/*") || normalizedSql.includes("*/")) {
+    throw new Error("SQL comments are not allowed in the project editor");
+  }
   const compactSql = normalizedSql.replace(/;\s*$/, "");
   if (compactSql.includes(";")) throw new Error("Only one SQL statement is allowed per request");
   if (/\b(public|pg_catalog|information_schema|kb_[a-f0-9]+)\s*\./i.test(normalizedSql)) {
