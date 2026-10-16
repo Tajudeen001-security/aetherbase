@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { v4 as uuidv4 } from "uuid";
-import { query } from "./db/client";
+import { query, queryProject } from "./db/client";
 import jwt from "jsonwebtoken";
 
 const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === "production" ? "" : "kotahbase-dev-secret-change-me");
@@ -22,11 +22,14 @@ extraRoutes.get("/data/:table", async (c) => {
     const user = await getUser(c.req.header("Authorization"));
     if (!user) return c.json({ error: "Not authenticated" }, 401);
     const table = c.req.param("table");
+    const projectId = c.req.query("project_id") || "";
+    const owned = await query("SELECT id FROM projects WHERE id = $1 AND owner_id = $2", [projectId, user.id]);
+    if (!owned.rows.length) return c.json({ error: "Project not found" }, 404);
     if (!/^[a-z][a-z0-9_]*$/.test(table)) return c.json({ error: "Invalid table" }, 400);
-    const limit = Math.min(Number(c.req.query("limit") || 50), 200);
+    const limit = Math.min(200, Math.max(1, Number(c.req.query("limit") || 50)));
     const offset = Number(c.req.query("offset") || 0);
-    const res = await query(`SELECT * FROM ${table} ORDER BY 1 DESC LIMIT $1 OFFSET $2`, [limit, offset]);
-    const countRes = await query(`SELECT COUNT(*)::int AS count FROM ${table}`);
+    const res = await queryProject(projectId, `SELECT * FROM ${table} ORDER BY 1 DESC LIMIT $1 OFFSET $2`, [limit, offset]);
+    const countRes = await queryProject(projectId, `SELECT COUNT(*)::int AS count FROM ${table}`);
     return c.json({
       table,
       rows: res.rows,
@@ -45,14 +48,17 @@ extraRoutes.post("/data/:table", async (c) => {
     const user = await getUser(c.req.header("Authorization"));
     if (!user) return c.json({ error: "Not authenticated" }, 401);
     const table = c.req.param("table");
-    if (!/^[a-z][a-z0-9_]*$/.test(table)) return c.json({ error: "Invalid table" }, 400);
     const body = await c.req.json();
-    const keys = Object.keys(body).filter(k => /^[a-z][a-z0-9_]*$/.test(k));
+    const projectId = String(body.project_id || "");
+    const owned = await query("SELECT id FROM projects WHERE id = $1 AND owner_id = $2", [projectId, user.id]);
+    if (!owned.rows.length) return c.json({ error: "Project not found" }, 404);
+    if (!/^[a-z][a-z0-9_]*$/.test(table)) return c.json({ error: "Invalid table" }, 400);
+    const keys = Object.keys(body).filter(k => k !== "project_id" && /^[a-z][a-z0-9_]*$/.test(k));
     if (keys.length === 0) return c.json({ error: "No valid fields" }, 400);
     const cols = keys.join(", ");
     const placeholders = keys.map((_, i) => `$${i + 1}`).join(", ");
     const values = keys.map(k => body[k]);
-    const res = await query(
+    const res = await queryProject(projectId,
       `INSERT INTO ${table} (${cols}) VALUES (${placeholders}) RETURNING *`,
       values
     );
@@ -70,9 +76,10 @@ extraRoutes.post("/projects/:id/regenerate-key", async (c) => {
     const id = c.req.param("id");
     const proj = await query("SELECT id FROM projects WHERE id = $1 AND owner_id = $2", [id, user.id]);
     if (proj.rows.length === 0) return c.json({ error: "Not found" }, 404);
-    const apiKey = `kb_${uuidv4().replace(/-/g, "")}`;
-    await query("UPDATE projects SET api_key = $1 WHERE id = $2", [apiKey, id]);
-    return c.json({ api_key: apiKey, message: "API key regenerated. Update your apps." });
+    const apiKey = `kb_service_${uuidv4().replace(/-/g, "")}`;
+    const anonKey = `kb_anon_${uuidv4().replace(/-/g, "")}`;
+    await query("UPDATE projects SET api_key = $1, service_role_key = $1, anon_key = $2 WHERE id = $3", [apiKey, anonKey, id]);
+    return c.json({ api_key: apiKey, service_role_key: apiKey, anon_key: anonKey, message: "Project keys rotated. Update your apps and keep the service-role key private." });
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
   }
@@ -166,18 +173,22 @@ extraRoutes.post("/seed/:pack", async (c) => {
     const user = await getUser(c.req.header("Authorization"));
     if (!user) return c.json({ error: "Not authenticated" }, 401);
     const pack = c.req.param("pack");
+    const body = await c.req.json().catch(() => ({}));
+    const projectId = String(body.project_id || c.req.query("project_id") || "");
+    const owned = await query("SELECT id FROM projects WHERE id = $1 AND owner_id = $2", [projectId, user.id]);
+    if (!owned.rows.length) return c.json({ error: "Project not found" }, 404);
     if (pack === "social") {
-      await query(`INSERT INTO profiles (username, display_name, bio) VALUES
+      await queryProject(projectId, `INSERT INTO profiles (username, display_name, bio) VALUES
         ('demo_user', 'Demo User', 'Hello from KotahBase'),
         ('jane', 'Jane Doe', 'Building on KotahBase')
         ON CONFLICT DO NOTHING`);
-      await query(`INSERT INTO posts (content, likes_count) VALUES
+      await queryProject(projectId, `INSERT INTO posts (content, likes_count) VALUES
         ('Welcome to KotahBase social!', 3),
         ('Building African backends 🚀', 7)`);
       return c.json({ message: "Social sample data seeded" });
     }
     if (pack === "game") {
-      await query(`INSERT INTO game_scores (player_name, score) VALUES
+      await queryProject(projectId, `INSERT INTO game_scores (player_name, score) VALUES
         ('Ace', 1200), ('Nova', 980), ('Kai', 750)`);
       return c.json({ message: "Game sample scores seeded" });
     }
