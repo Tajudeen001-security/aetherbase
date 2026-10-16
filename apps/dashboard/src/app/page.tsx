@@ -35,6 +35,8 @@ export default function Page() {
   const [storageItems, setStorageItems] = useState<any[]>([]);
   const [storageBusy, setStorageBusy] = useState(false);
   const [storageMsg, setStorageMsg] = useState("");
+  const [keyRotateBusy, setKeyRotateBusy] = useState(false);
+  const [projectDeleteBusy, setProjectDeleteBusy] = useState(false);
   const [authCfg, setAuthCfg] = useState<any>(null);
   const [authUsers, setAuthUsers] = useState<any[]>([]);
   const [authSaveMsg, setAuthSaveMsg] = useState("");
@@ -413,6 +415,7 @@ export default function Page() {
               <KeyRow label="Project URL" value={project.url || `${API_URL}/p/${project.ref}`} hint="Base URL" copied={copied==="url"} onCopy={() => copy(project.url || `${API_URL}/p/${project.ref}`, "url")} />
               <KeyRow label="anon key" value={project.anon_key || "—"} hint="Public" copied={copied==="anon"} onCopy={() => project.anon_key && copy(project.anon_key, "anon")} />
               <KeyRow label="service_role key" value={project.service_role_key || project.api_key || "—"} hint="Secret" secret copied={copied==="svc"} onCopy={() => copy(project.service_role_key || project.api_key, "svc")} />
+              <div className="mt-5 rounded-xl border border-amber-400/20 bg-amber-400/[0.04] p-4"><p className="text-xs leading-5 text-amber-100/80">Rotating keys immediately invalidates the old project keys. Update every server/app using them. Never place the service-role key in browser or mobile code.</p><button disabled={keyRotateBusy} onClick={async()=>{if(!confirm("Rotate both project keys now? Existing integrations will stop working until updated."))return;setKeyRotateBusy(true);const {res,data}=await api(`/v1/projects/${project.id}/regenerate-key`,{method:"POST"});setKeyRotateBusy(false);if(res.ok)setProject({...project,...data});else setAuthErr(data.error||"Key rotation failed");}} className="mt-3 rounded-lg border border-amber-300/30 px-3 py-2 text-xs text-amber-100 disabled:opacity-50">{keyRotateBusy?"Rotating keys…":"Rotate project keys"}</button></div>
             </div>
           )}
           {tab === "authentication" && project && (
@@ -536,6 +539,10 @@ export default function Page() {
             <div><h1 className="text-lg font-medium mb-4">Settings</h1>
               <p className="text-sm text-zinc-400 mb-3">{user?.email}</p>
               <button onClick={clearSession} className="text-sm text-red-400">Sign out</button>
+              <section className="mt-8 max-w-xl rounded-xl border border-rose-500/20 bg-rose-500/[0.04] p-4">
+                <h2 className="text-sm font-medium text-rose-200">Danger zone</h2><p className="mt-2 text-xs leading-5 text-zinc-400">Deleting this project permanently removes its database schema, usage logs, and project-scoped storage objects. Export anything you need first.</p>
+                <button disabled={projectDeleteBusy} onClick={async()=>{if(!project?.id||!confirm("Permanently delete this project and its data? This cannot be undone."))return;setProjectDeleteBusy(true);const {res,data}=await api(`/projects/${project.id}`,{method:"DELETE"});setProjectDeleteBusy(false);if(!res.ok){setAuthErr(data.error||"Project deletion failed");return;}const remaining=projects.filter((p:any)=>p.id!==project.id);setProjects(remaining);setProject(remaining[0]||null);setUsage(null);setRequestLogs([]);setStorageItems([]);setView(remaining.length?"projects":"onboard");}} className="mt-3 rounded-lg border border-rose-400/30 px-3 py-2 text-xs text-rose-200 disabled:opacity-50">{projectDeleteBusy?"Deleting project…":"Delete this project"}</button>
+              </section>
             </div>
           )}
         </main>
