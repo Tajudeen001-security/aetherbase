@@ -480,8 +480,13 @@ export default function Page() {
             </div>
           )}
           {tab === "tables" && (
-            <div><h1 className="text-lg font-medium mb-4">Tables</h1>
+            <div className="max-w-5xl">
+              <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-5"><div><h1 className="text-lg font-medium">Database tables</h1><p className="mt-1 text-sm text-zinc-500">Tables are created inside this project’s isolated schema.</p></div>
+                <div className="flex flex-wrap gap-2"><button onClick={async()=>{const {res,data}=await api("/schemas/packs/social",{method:"POST",body:JSON.stringify({project_id:project.id})}); if(res.ok){setStorageMsg(""); const t=await api(`/tables?project_id=${encodeURIComponent(project.id)}`); if(t.res.ok)setTables(t.data); setSqlOut({message:"Social schema pack installed",rows:[]});} else setSqlOut({error:data.error||"Could not install pack"});}} className="rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-200">Install social pack</button><button onClick={async()=>{const {res,data}=await api("/schemas/packs/game",{method:"POST",body:JSON.stringify({project_id:project.id})}); if(res.ok){const t=await api(`/tables?project_id=${encodeURIComponent(project.id)}`); if(t.res.ok)setTables(t.data); setSqlOut({message:"Game schema pack installed",rows:[]});} else setSqlOut({error:data.error||"Could not install pack"});}} className="rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-200">Install game pack</button><button onClick={()=>api(`/tables?project_id=${encodeURIComponent(project.id)}`).then(({res,data})=>{if(res.ok)setTables(data);})} className="rounded-lg bg-emerald-400 px-3 py-2 text-xs font-medium text-black">Refresh</button></div>
+              </div>
+              {sqlOut?.error && <p className="mb-3 text-sm text-rose-300">{sqlOut.error}</p>}{sqlOut?.message && <p className="mb-3 text-sm text-emerald-300">{sqlOut.message}</p>}
               <div className="flex flex-wrap gap-2">{tables.map(t => <span key={t} className="px-3 py-1.5 border border-zinc-800 rounded-md text-xs font-mono">{t}</span>)}</div>
+              {tables.length===0 && <p className="mt-5 text-sm text-zinc-500">No tables yet. Create one in SQL or install a starter pack.</p>}
             </div>
           )}
           {tab === "storage" && (
