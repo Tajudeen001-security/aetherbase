@@ -9,7 +9,7 @@ export default function Page() {
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
   const [boot, setBoot] = useState(true);
-  const [view, setView] = useState<"auth" | "onboard" | "app">("auth");
+  const [view, setView] = useState<"auth" | "onboard" | "projects" | "app">("auth");
   const [tab, setTab] = useState("overview");
   const [mode, setMode] = useState<"login" | "signup" | "verify">("login");
   const [email, setEmail] = useState("");
@@ -102,7 +102,7 @@ export default function Page() {
           const list = await res.json();
           setProjects(list);
           if (list.length === 0) setView("onboard");
-          else { setView("app"); if (!project) setProject(list[0]); }
+          else { setView("projects"); if (!project) setProject(list[0]); }
         }
       } catch { setView("app"); }
     })();
@@ -181,7 +181,7 @@ export default function Page() {
     const { res, data } = await api("/projects", { method: "POST", body: JSON.stringify({ name: pName.trim(), password: pPass }) });
     setPBusy(false);
     if (!res.ok) { setPMsg(data.error || "Failed"); return; }
-    setProjects([...projects, data]); setProject(data); setPName(""); setPPass(""); setView("app"); setTab("api");
+    setProjects([...projects, data]); setProject(data); setPName(""); setPPass(""); setView("app"); setTab("overview");
   }
   async function runSql() {
     setSqlBusy(true);
@@ -246,6 +246,36 @@ export default function Page() {
     );
   }
 
+  if (view === "projects") {
+    return (
+      <div className="min-h-screen bg-[#080b09] text-white">
+        <header className="border-b border-white/[0.08] px-5 sm:px-8 py-4 flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-emerald-400 text-[#07100b] grid place-items-center font-black">a</div>
+          <div><div className="font-semibold tracking-tight">AetherBase</div><div className="text-xs text-zinc-500">Your backend workspace</div></div>
+          <div className="ml-auto flex items-center gap-3"><span className="hidden sm:block text-xs text-zinc-500">{user?.email}</span><button onClick={clearSession} className="text-xs text-zinc-400 hover:text-white">Sign out</button></div>
+        </header>
+        <main className="max-w-6xl mx-auto px-5 sm:px-8 py-10 sm:py-14">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-5 mb-9">
+            <div><p className="text-xs uppercase tracking-[.2em] text-emerald-300 mb-3">Workspace</p><h1 className="text-3xl sm:text-4xl font-semibold tracking-[-.045em]">Your projects</h1><p className="mt-3 text-sm text-zinc-400 max-w-xl">Each project has its own reference, API URL and keys. Choose a project to open its backend controls.</p></div>
+            <button onClick={() => {setPMsg("");setView("onboard");}} className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-[#07100b] font-semibold text-sm px-5 py-3 transition"><span className="text-lg leading-none">+</span> Create project</button>
+          </div>
+          <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
+            {projects.map((p:any) => <button key={p.id} onClick={() => {setProject(p);setTab("overview");setView("app");}} className="group text-left rounded-2xl border border-white/[0.09] bg-white/[0.025] hover:bg-white/[0.045] hover:border-emerald-400/40 p-5 transition">
+              <div className="flex items-start justify-between gap-3"><div className="w-11 h-11 rounded-xl border border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-300 grid place-items-center font-semibold">{String(p.name||"A").slice(0,1).toUpperCase()}</div><span className="text-[11px] rounded-full border border-emerald-400/20 bg-emerald-400/[0.06] text-emerald-300 px-2.5 py-1">Project</span></div>
+              <h2 className="mt-5 text-lg font-semibold tracking-tight group-hover:text-emerald-200">{p.name}</h2>
+              <p className="mt-1 text-xs text-zinc-500 font-mono break-all">{p.ref || "Reference not available"}</p>
+              <div className="mt-5 pt-4 border-t border-white/[0.07] flex items-center justify-between text-xs"><span className="text-zinc-500">Open project</span><span className="text-emerald-300 group-hover:translate-x-1 transition-transform">→</span></div>
+            </button>)}
+            <button onClick={() => {setPMsg("");setView("onboard");}} className="min-h-[190px] rounded-2xl border border-dashed border-white/[0.14] hover:border-emerald-400/40 hover:bg-emerald-400/[0.025] p-5 flex flex-col items-center justify-center text-center transition">
+              <span className="w-10 h-10 rounded-full border border-white/10 text-zinc-300 text-2xl grid place-items-center">+</span><span className="mt-3 text-sm font-medium">Start another project</span><span className="mt-1 text-xs text-zinc-500">Create a separate app backend</span>
+            </button>
+          </div>
+          <p className="mt-8 text-[11px] text-zinc-600">Keep service-role keys private. Public client keys belong in browser or mobile apps only when paired with proper database access policies.</p>
+        </main>
+      </div>
+    );
+  }
+
   if (view === "onboard") {
     return (
       <div className="min-h-screen bg-[#0c0c0c] flex items-center justify-center p-4">
@@ -276,7 +306,7 @@ export default function Page() {
   return (
     <div className="min-h-screen bg-[#0c0c0c] text-zinc-100 flex flex-col">
       <header className="h-12 border-b border-zinc-800 flex items-center px-4 gap-3 shrink-0">
-        <div className="w-6 h-6 rounded bg-emerald-500 flex items-center justify-center text-black font-bold text-[10px]">K</div>
+        <div className="w-7 h-7 rounded-lg bg-emerald-400 flex items-center justify-center text-[#07100b] font-black text-xs">a</div>
         <select value={project?.id || ""} onChange={e => { const p = projects.find((x: any) => x.id === e.target.value); if (p) setProject(p); }} className="bg-zinc-900 border border-zinc-700 rounded-md text-xs px-2 py-1.5 max-w-[180px] outline-none">
           {projects.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
