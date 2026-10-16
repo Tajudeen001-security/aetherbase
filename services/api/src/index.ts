@@ -161,14 +161,15 @@ app.post("/projects", async (c) => {
     const user = await getUserFromToken(c.req.header("Authorization"));
     if (!user) return c.json({ error: "Not authenticated" }, 401);
     const { name, password } = await c.req.json();
-    if (!name || !password) return c.json({ error: "name and password required" }, 400);
-    if ((await query("SELECT id FROM projects WHERE LOWER(name) = LOWER($1)", [name])).rows.length) return c.json({ error: "Name taken" }, 400);
+    if (typeof name !== "string" || !name.trim() || typeof password !== "string" || password.length < 10) return c.json({ error: "Project name and a project password of at least 10 characters are required" }, 400);
+    const projectName = name.trim().slice(0, 64);
+    if ((await query("SELECT id FROM projects WHERE owner_id = $1 AND LOWER(name) = LOWER($2)", [user.id, projectName])).rows.length) return c.json({ error: "You already have a project with that name" }, 400);
     const id = uuidv4();
     const { ref, anon_key, service_role_key } = makeKeys();
     const schema = "kb_" + id.replace(/-/g, "");
     await query(`CREATE SCHEMA "${schema}"`);
     try {
-      await query("INSERT INTO projects (id, name, password, owner_id, api_key, ref, anon_key, service_role_key) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)", [id, name, await bcrypt.hash(password, 10), user.id, service_role_key, ref, anon_key, service_role_key]);
+      await query("INSERT INTO projects (id, name, password, owner_id, api_key, ref, anon_key, service_role_key) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)", [id, projectName, await bcrypt.hash(password, 10), user.id, service_role_key, ref, anon_key, service_role_key]);
     } catch (error) {
       await query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
       throw error;
@@ -304,6 +305,8 @@ async function ensureTables() {
     await query(`CREATE TABLE IF NOT EXISTS projects (id UUID PRIMARY KEY, name TEXT UNIQUE NOT NULL, password TEXT NOT NULL, owner_id UUID REFERENCES users(id) ON DELETE CASCADE, api_key TEXT UNIQUE NOT NULL, google_client_id TEXT, google_client_secret TEXT, github_client_id TEXT, github_client_secret TEXT, redirect_url TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`);
     await query(`CREATE TABLE IF NOT EXISTS app_users (id UUID PRIMARY KEY, project_id UUID REFERENCES projects(id) ON DELETE CASCADE, email TEXT NOT NULL, password TEXT, provider TEXT DEFAULT 'email', provider_id TEXT, metadata JSONB, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(project_id, email))`);
     await query(`CREATE TABLE IF NOT EXISTS otp_codes (email TEXT PRIMARY KEY, code TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL, type TEXT NOT NULL)`);
+    await query("ALTER TABLE projects DROP CONSTRAINT IF EXISTS projects_name_key");
+    await query("CREATE UNIQUE INDEX IF NOT EXISTS projects_owner_name_lower_idx ON projects(owner_id, LOWER(name))");
     try {
       await query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS ref TEXT UNIQUE`);
       await query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS anon_key TEXT`);
