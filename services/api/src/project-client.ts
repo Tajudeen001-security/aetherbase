@@ -33,6 +33,7 @@ async function loadProjectByRef(ref: string) {
   const res = await query(
     `SELECT id, name, ref, anon_key, service_role_key, api_key, owner_id,
             google_client_id, google_client_secret, github_client_id, github_client_secret,
+            discord_client_id, discord_client_secret, enable_discord,
             redirect_url, site_url, additional_redirect_urls,
             enable_email, enable_google, enable_github
      FROM projects WHERE ref = $1`,
@@ -118,7 +119,15 @@ projectClientRoutes.get("/:ref/auth/v1/authorize/:provider", async (c) => {
     return c.redirect(url);
   }
 
-  return c.json({ error: "Unknown provider. Use google or github." }, 400);
+  if (provider === "discord") {
+    if (project.enable_discord !== true) return c.json({ error: "Discord disabled for this project" }, 403);
+    if (!project.discord_client_id) return c.json({ error: "Discord not configured. Add Client ID in Auth settings." }, 400);
+    const redirectUri = `${API_URL}/p/${ref}/auth/v1/callback/discord`;
+    const url = `https://discord.com/oauth2/authorize?client_id=${encodeURIComponent(project.discord_client_id)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=identify%20email&state=${state}`;
+    return c.redirect(url);
+  }
+
+  return c.json({ error: "Unknown provider. Use google, github or discord." }, 400);
 });
 
 projectClientRoutes.get("/:ref/auth/v1/callback/google", async (c) => {
@@ -286,6 +295,41 @@ projectClientRoutes.get("/:ref/auth/v1/callback/github", async (c) => {
   }
 });
 
+projectClientRoutes.get("/:ref/auth/v1/callback/discord", async (c) => {
+  const ref = c.req.param("ref");
+  try {
+    const code = c.req.query("code");
+    const stateRaw = c.req.query("state") || "";
+    let redirectTo: string | undefined;
+    try { const st = JSON.parse(Buffer.from(stateRaw, "base64url").toString()); redirectTo = st.redirect_to || undefined; } catch {}
+    const project = await loadProjectByRef(ref);
+    if (!project || project.enable_discord !== true || !project.discord_client_id || !project.discord_client_secret || !code) return c.text("Discord OAuth is not configured or authorization failed", 400);
+    const redirectUri = `${API_URL}/p/${ref}/auth/v1/callback/discord`;
+    const tokenRes = await fetch("https://discord.com/api/oauth2/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: project.discord_client_id, client_secret: project.discord_client_secret, grant_type: "authorization_code", code, redirect_uri: redirectUri }) });
+    const tokens = await tokenRes.json();
+    if (!tokenRes.ok || !tokens.access_token) return c.text("Discord token exchange failed", 400);
+    const profileRes = await fetch("https://discord.com/api/users/@me", { headers: { Authorization: `Bearer ${tokens.access_token}` } });
+    const profile = await profileRes.json();
+    if (!profileRes.ok || !profile.email) return c.text("Discord did not provide an email. Enable the email OAuth scope.", 400);
+    const email = String(profile.email).toLowerCase();
+    const existing = await query("SELECT * FROM app_users WHERE project_id = $1 AND email = $2", [project.id, email]);
+    let user: any;
+    if (!existing.rows.length) {
+      const id = uuidv4();
+      await query("INSERT INTO app_users (id, project_id, email, password, provider, provider_id) VALUES ($1,$2,$3,NULL,'discord',$4)", [id, project.id, email, String(profile.id)]);
+      user = { id, email, provider: "discord" };
+    } else {
+      user = existing.rows[0];
+      await query("UPDATE app_users SET provider = 'discord', provider_id = $1 WHERE id = $2 AND project_id = $3", [String(profile.id), user.id, project.id]);
+    }
+    const access_token = createToken({ sub: user.id, email: user.email, project_id: project.id, role: "authenticated" });
+    const dest = pickRedirect(project, redirectTo);
+    if (!dest) return c.json({ access_token, token_type: "bearer", expires_in: 604800, user: { id: user.id, email: user.email, provider: "discord" } });
+    const sep = dest.includes("#") ? "&" : "#";
+    return c.redirect(`${dest}${sep}access_token=${access_token}&token_type=bearer&provider=discord`);
+  } catch (error: any) { return c.text("Discord callback failed: " + (error.message || "failed"), 500); }
+});
+
 async function projectMw(c: any, next: any) {
   const startedAt = Date.now();
   const path = c.req.path || "";
@@ -322,6 +366,7 @@ projectClientRoutes.get("/:ref", async (c) => {
       email: project.enable_email !== false,
       google: !!(project.enable_google !== false && project.google_client_id),
       github: !!(project.enable_github !== false && project.github_client_id),
+      discord: !!(project.enable_discord === true && project.discord_client_id),
       site_url: project.site_url || null
     }
   });
@@ -424,7 +469,8 @@ projectClientRoutes.get("/:ref/auth/v1/settings", async (c) => {
     site_url: project.site_url || null,
     authorize: {
       google: `${projectUrl(project.ref)}/auth/v1/authorize/google`,
-      github: `${projectUrl(project.ref)}/auth/v1/authorize/github`
+      github: `${projectUrl(project.ref)}/auth/v1/authorize/github`,
+      discord: `${projectUrl(project.ref)}/auth/v1/authorize/discord`
     }
   });
 });
