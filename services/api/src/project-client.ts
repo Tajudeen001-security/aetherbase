@@ -82,6 +82,9 @@ function pickRedirect(project: any, requested: string | undefined) {
 
 export const projectClientRoutes = new Hono();
 
+projectClientRoutes.use("/:ref", projectMw);
+projectClientRoutes.use("/:ref/*", projectMw);
+
 // OAuth authorize + callback must work WITHOUT apikey (browser redirect)
 projectClientRoutes.get("/:ref/auth/v1/authorize/:provider", async (c) => {
   const ref = c.req.param("ref");
@@ -305,8 +308,6 @@ async function projectMw(c: any, next: any) {
   await recordProjectUsage(project.id, c.res.status, bytes);
 }
 
-projectClientRoutes.use("/:ref", projectMw);
-projectClientRoutes.use("/:ref/*", projectMw);
 
 projectClientRoutes.get("/:ref", async (c) => {
   const project = (c as any).get("project");
