@@ -249,7 +249,7 @@ export default function Page() {
           <div className="absolute inset-0 pointer-events-none" style={{backgroundImage:"linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px, transparent 1px)",backgroundSize:"48px 48px"}} />
           <div className="absolute -top-32 -left-20 w-[520px] h-[520px] rounded-full bg-emerald-500/[0.09] blur-[120px]" />
           <div className="relative flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-emerald-400 text-[#07100b] grid place-items-center font-black text-lg">a</div>
+            <div className="w-9 h-9 rounded-xl bg-emerald-400 text-[#07100b] grid place-items-center font-black text-lg">K</div>
             <span className="text-[17px] font-semibold tracking-tight">KotahBase</span>
             <span className="ml-2 text-[10px] uppercase tracking-[.18em] text-zinc-500 border border-white/10 rounded px-2 py-1">Developer platform</span>
           </div>
@@ -265,7 +265,7 @@ export default function Page() {
         </section>
         <main className="flex-1 flex items-center justify-center px-5 py-10 sm:px-10">
           <div className="w-full max-w-[390px]">
-            <div className="lg:hidden flex items-center gap-3 mb-10"><div className="w-9 h-9 rounded-xl bg-emerald-400 text-[#07100b] grid place-items-center font-black text-lg">a</div><span className="font-semibold text-lg">KotahBase</span></div>
+            <div className="lg:hidden flex items-center gap-3 mb-10"><div className="w-9 h-9 rounded-xl bg-emerald-400 text-[#07100b] grid place-items-center font-black text-lg">K</div><span className="font-semibold text-lg">KotahBase</span></div>
             <p className="text-xs uppercase tracking-[.18em] text-emerald-300 mb-3">{mode === "verify" ? "One last step" : "Developer access"}</p>
             <h2 className="text-[30px] font-semibold tracking-[-.04em]">{mode === "verify" ? "Verify your email" : mode === "signup" ? "Create your account" : "Welcome back"}</h2>
             <p className="text-sm text-zinc-500 mt-2 mb-8">{mode === "verify" ? "Enter the six-digit code associated with your account." : mode === "signup" ? "Get your project workspace ready in a few steps." : "Sign in to continue to your workspace."}</p>
@@ -298,7 +298,7 @@ export default function Page() {
     return (
       <div className="min-h-screen bg-[#080b09] text-white">
         <header className="border-b border-white/[0.08] px-5 sm:px-8 py-4 flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-emerald-400 text-[#07100b] grid place-items-center font-black">a</div>
+          <div className="w-9 h-9 rounded-xl bg-emerald-400 text-[#07100b] grid place-items-center font-black">K</div>
           <div><div className="font-semibold tracking-tight">KotahBase</div><div className="text-xs text-zinc-500">Your backend workspace</div></div>
           <div className="ml-auto flex items-center gap-3"><span className="hidden sm:block text-xs text-zinc-500">{user?.email}</span><button onClick={clearSession} className="text-xs text-zinc-400 hover:text-white">Sign out</button></div>
         </header>
@@ -330,7 +330,7 @@ export default function Page() {
       <div className="min-h-screen bg-[#080b09] text-white relative overflow-hidden flex flex-col">
         <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[700px] h-[500px] rounded-full bg-emerald-400/[0.06] blur-[140px] pointer-events-none" />
         <header className="relative border-b border-white/[0.08] px-5 sm:px-8 py-4 flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-emerald-400 text-[#07100b] grid place-items-center font-black">a</div><span className="font-semibold tracking-tight">KotahBase</span>
+          <div className="w-9 h-9 rounded-xl bg-emerald-400 text-[#07100b] grid place-items-center font-black">K</div><span className="font-semibold tracking-tight">KotahBase</span>
           {projects.length > 0 && <button onClick={() => setView("projects")} className="ml-auto text-xs text-zinc-400 hover:text-white">← All projects</button>}
           <button onClick={clearSession} className={projects.length > 0 ? "text-xs text-zinc-500 hover:text-white" : "ml-auto text-xs text-zinc-500 hover:text-white"}>Sign out</button>
         </header>
@@ -365,7 +365,7 @@ export default function Page() {
   return (
     <div className="min-h-screen bg-[#0c0c0c] text-zinc-100 flex flex-col">
       <header className="h-12 border-b border-zinc-800 flex items-center px-4 gap-3 shrink-0">
-        <div className="w-7 h-7 rounded-lg bg-emerald-400 flex items-center justify-center text-[#07100b] font-black text-xs">a</div>
+        <div className="w-7 h-7 rounded-lg bg-emerald-400 flex items-center justify-center text-[#07100b] font-black text-xs">K</div>
         <select value={project?.id || ""} onChange={e => { const p = projects.find((x: any) => x.id === e.target.value); if (p) setProject(p); }} className="bg-zinc-900 border border-zinc-700 rounded-md text-xs px-2 py-1.5 max-w-[180px] outline-none">
           {projects.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
