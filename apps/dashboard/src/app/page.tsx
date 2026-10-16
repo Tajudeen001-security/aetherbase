@@ -32,6 +32,9 @@ export default function Page() {
   const [health, setHealth] = useState<any>(null);
   const [usage, setUsage] = useState<any>(null);
   const [requestLogs, setRequestLogs] = useState<any[]>([]);
+  const [storageItems, setStorageItems] = useState<any[]>([]);
+  const [storageBusy, setStorageBusy] = useState(false);
+  const [storageMsg, setStorageMsg] = useState("");
   const [authCfg, setAuthCfg] = useState<any>(null);
   const [authUsers, setAuthUsers] = useState<any[]>([]);
   const [authSaveMsg, setAuthSaveMsg] = useState("");
@@ -115,6 +118,7 @@ export default function Page() {
     if (tab === "tables" || tab === "sql") api(`/tables?project_id=${encodeURIComponent(project.id)}`).then(({ res, data }) => { if (res.ok) setTables(data); });
     if (tab === "authentication" && project?.id) loadAuth(project.id);
     if (tab === "logs" && project?.id) api(`/projects/${project.id}/logs?limit=100`).then(({ res, data }) => { if (res.ok) setRequestLogs(data); });
+    if (tab === "storage" && project?.id) api(`/projects/${project.id}/storage`).then(({ res, data }) => { if (res.ok) { setStorageItems(data); setStorageMsg(""); } else setStorageMsg(data.error || "Could not load storage"); }).catch(() => setStorageMsg("Could not connect to storage API"));
   }, [tab, token, view, project?.id]);
 
   useEffect(() => {
@@ -209,6 +213,20 @@ export default function Page() {
     setPBusy(false);
     if (!res.ok) { setPMsg(data.error || "Failed"); return; }
     setProjects([...projects, data]); setProject(data); setPName(""); setPPass(""); setView("app"); setTab("overview");
+  }
+  async function uploadStorageFile(file: File | undefined) {
+    if (!file || !project?.id || !token) return;
+    setStorageBusy(true); setStorageMsg("");
+    const form = new FormData(); form.append("file", file);
+    try {
+      const res = await fetch(`${API_URL}/projects/${project.id}/storage`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Upload failed");
+      const refresh = await api(`/projects/${project.id}/storage`);
+      if (refresh.res.ok) setStorageItems(refresh.data);
+      setStorageMsg(`Uploaded ${data.name}. Download links expire after one hour.`);
+    } catch (error: any) { setStorageMsg(error.message || "Upload failed"); }
+    finally { setStorageBusy(false); }
   }
   async function runSql() {
     if (!project?.id) return;
@@ -336,6 +354,7 @@ export default function Page() {
     { id: "api", label: "API" },
     { id: "authentication", label: "Authentication" },
     { id: "tables", label: "Tables" },
+    { id: "storage", label: "Storage" },
     { id: "sql", label: "SQL" },
     { id: "logs", label: "Logs" },
     { id: "settings", label: "Settings" }
@@ -456,6 +475,18 @@ export default function Page() {
           {tab === "tables" && (
             <div><h1 className="text-lg font-medium mb-4">Tables</h1>
               <div className="flex flex-wrap gap-2">{tables.map(t => <span key={t} className="px-3 py-1.5 border border-zinc-800 rounded-md text-xs font-mono">{t}</span>)}</div>
+            </div>
+          )}
+          {tab === "storage" && (
+            <div className="max-w-5xl">
+              <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-5"><div><h1 className="text-lg font-medium">Object storage</h1><p className="mt-1 text-sm text-zinc-500">Private project files with short-lived signed download links. Upload limit: 25 MB per file.</p></div>
+                <label className={`inline-flex items-center justify-center rounded-lg px-4 py-2.5 text-sm font-medium cursor-pointer ${storageBusy ? "bg-zinc-700 text-zinc-300" : "bg-emerald-400 text-black"}`}>{storageBusy ? "Uploading…" : "Upload file"}<input type="file" disabled={storageBusy} className="hidden" onChange={e => { const file = e.target.files?.[0]; void uploadStorageFile(file); e.currentTarget.value = ""; }} /></label>
+              </div>
+              {storageMsg && <p className="mb-4 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-300">{storageMsg}</p>}
+              <div className="rounded-xl border border-zinc-800 overflow-hidden"><div className="grid grid-cols-[minmax(0,1fr)_90px_150px] gap-3 bg-zinc-900 px-4 py-3 text-xs text-zinc-500"><span>Object</span><span>Size</span><span>Actions</span></div>
+                {storageItems.map((item:any) => <div key={item.key} className="grid grid-cols-[minmax(0,1fr)_90px_150px] gap-3 items-center border-t border-zinc-800 px-4 py-3 text-xs"><span className="font-mono truncate" title={item.key}>{String(item.key).split("/").slice(1).join("/")}</span><span className="text-zinc-500">{item.size == null ? "—" : `${(Number(item.size)/1024).toFixed(1)} KB`}</span><span className="flex gap-3"><button onClick={async()=>{const {res,data}=await api(`/projects/${project.id}/storage/url?key=${encodeURIComponent(item.key)}`); if(res.ok) window.open(data.url,"_blank","noopener,noreferrer"); else setStorageMsg(data.error||"Download link failed");}} className="text-emerald-300">Download</button><button onClick={async()=>{if(!confirm("Delete this file permanently?")) return; const {res,data}=await api(`/projects/${project.id}/storage`,{method:"DELETE",body:JSON.stringify({key:item.key})}); if(res.ok) setStorageItems(storageItems.filter((x:any)=>x.key!==item.key)); else setStorageMsg(data.error||"Delete failed");}} className="text-rose-300">Delete</button></span></div>)}
+                {storageItems.length===0 && <p className="p-6 text-sm text-zinc-500">No files yet. Configure the storage provider on the API host, then upload your first file.</p>}
+              </div>
             </div>
           )}
           {tab === "sql" && (
