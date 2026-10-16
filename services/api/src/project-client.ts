@@ -34,6 +34,7 @@ async function loadProjectByRef(ref: string) {
     `SELECT id, name, ref, anon_key, service_role_key, api_key, owner_id,
             google_client_id, google_client_secret, github_client_id, github_client_secret,
             discord_client_id, discord_client_secret, enable_discord,
+            microsoft_client_id, microsoft_client_secret, enable_microsoft,
             redirect_url, site_url, additional_redirect_urls,
             enable_email, enable_google, enable_github
      FROM projects WHERE ref = $1`,
@@ -127,7 +128,15 @@ projectClientRoutes.get("/:ref/auth/v1/authorize/:provider", async (c) => {
     return c.redirect(url);
   }
 
-  return c.json({ error: "Unknown provider. Use google, github or discord." }, 400);
+  if (provider === "microsoft") {
+    if (project.enable_microsoft !== true) return c.json({ error: "Microsoft login disabled for this project" }, 403);
+    if (!project.microsoft_client_id) return c.json({ error: "Microsoft not configured. Add Client ID in Auth settings." }, 400);
+    const redirectUri = `${API_URL}/p/${ref}/auth/v1/callback/microsoft`;
+    const url = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=${encodeURIComponent(project.microsoft_client_id)}&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}&response_mode=query&scope=openid%20profile%20email%20User.Read&state=${state}`;
+    return c.redirect(url);
+  }
+
+  return c.json({ error: "Unknown provider. Use google, github, discord or microsoft." }, 400);
 });
 
 projectClientRoutes.get("/:ref/auth/v1/callback/google", async (c) => {
@@ -330,6 +339,41 @@ projectClientRoutes.get("/:ref/auth/v1/callback/discord", async (c) => {
   } catch (error: any) { return c.text("Discord callback failed: " + (error.message || "failed"), 500); }
 });
 
+projectClientRoutes.get("/:ref/auth/v1/callback/microsoft", async (c) => {
+  const ref = c.req.param("ref");
+  try {
+    const code = c.req.query("code");
+    const stateRaw = c.req.query("state") || "";
+    let redirectTo: string | undefined;
+    try { const st = JSON.parse(Buffer.from(stateRaw, "base64url").toString()); redirectTo = st.redirect_to || undefined; } catch {}
+    const project = await loadProjectByRef(ref);
+    if (!project || project.enable_microsoft !== true || !project.microsoft_client_id || !project.microsoft_client_secret || !code) return c.text("Microsoft OAuth is not configured or authorization failed", 400);
+    const redirectUri = `${API_URL}/p/${ref}/auth/v1/callback/microsoft`;
+    const tokenRes = await fetch("https://login.microsoftonline.com/common/oauth2/v2.0/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: project.microsoft_client_id, client_secret: project.microsoft_client_secret, grant_type: "authorization_code", code, redirect_uri: redirectUri, scope: "openid profile email User.Read" }) });
+    const tokens = await tokenRes.json();
+    if (!tokenRes.ok || !tokens.access_token) return c.text("Microsoft token exchange failed", 400);
+    const profileRes = await fetch("https://graph.microsoft.com/v1.0/me", { headers: { Authorization: `Bearer ${tokens.access_token}` } });
+    const profile = await profileRes.json();
+    const email = String(profile.mail || profile.userPrincipalName || "").toLowerCase();
+    if (!profileRes.ok || !email) return c.text("Microsoft did not provide a usable email address", 400);
+    const existing = await query("SELECT * FROM app_users WHERE project_id = $1 AND email = $2", [project.id, email]);
+    let user: any;
+    if (!existing.rows.length) {
+      const id = uuidv4();
+      await query("INSERT INTO app_users (id, project_id, email, password, provider, provider_id) VALUES ($1,$2,$3,NULL,\u0027microsoft\u0027,$4)", [id, project.id, email, String(profile.id)]);
+      user = { id, email, provider: "microsoft" };
+    } else {
+      user = existing.rows[0];
+      await query("UPDATE app_users SET provider = \u0027microsoft\u0027, provider_id = $1 WHERE id = $2 AND project_id = $3", [String(profile.id), user.id, project.id]);
+    }
+    const access_token = createToken({ sub: user.id, email: user.email, project_id: project.id, role: "authenticated" });
+    const dest = pickRedirect(project, redirectTo);
+    if (!dest) return c.json({ access_token, token_type: "bearer", expires_in: 604800, user: { id: user.id, email: user.email, provider: "microsoft" } });
+    const sep = dest.includes("#") ? "&" : "#";
+    return c.redirect(`${dest}${sep}access_token=${access_token}&token_type=bearer&provider=microsoft`);
+  } catch (error: any) { return c.text("Microsoft callback failed: " + (error.message || "failed"), 500); }
+});
+
 async function projectMw(c: any, next: any) {
   const startedAt = Date.now();
   const path = c.req.path || "";
@@ -367,6 +411,7 @@ projectClientRoutes.get("/:ref", async (c) => {
       google: !!(project.enable_google !== false && project.google_client_id),
       github: !!(project.enable_github !== false && project.github_client_id),
       discord: !!(project.enable_discord === true && project.discord_client_id),
+      microsoft: !!(project.enable_microsoft === true && project.microsoft_client_id),
       site_url: project.site_url || null
     }
   });
@@ -470,7 +515,8 @@ projectClientRoutes.get("/:ref/auth/v1/settings", async (c) => {
     authorize: {
       google: `${projectUrl(project.ref)}/auth/v1/authorize/google`,
       github: `${projectUrl(project.ref)}/auth/v1/authorize/github`,
-      discord: `${projectUrl(project.ref)}/auth/v1/authorize/discord`
+      discord: `${projectUrl(project.ref)}/auth/v1/authorize/discord`,
+      microsoft: `${projectUrl(project.ref)}/auth/v1/authorize/microsoft`
     }
   });
 });
