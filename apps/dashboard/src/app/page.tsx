@@ -88,7 +88,7 @@ export default function Page() {
         if (res.status === 401) clearSession();
         else if (res.ok) { const u = await res.json(); setToken(t); setUser(u); localStorage.setItem(TOKEN_KEY, t); }
         else { localStorage.removeItem(TOKEN_KEY); setAuthErr("We couldn't validate your session. Please sign in again."); }
-      } catch { setAuthErr("The AetherBase API is unreachable. Check the API deployment and try again."); }
+      } catch { setAuthErr("The KotahBase API is unreachable. Check the API deployment and try again."); }
       setBoot(false);
     })();
   }, []);
@@ -218,7 +218,7 @@ export default function Page() {
           <div className="absolute -top-32 -left-20 w-[520px] h-[520px] rounded-full bg-emerald-500/[0.09] blur-[120px]" />
           <div className="relative flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-emerald-400 text-[#07100b] grid place-items-center font-black text-lg">a</div>
-            <span className="text-[17px] font-semibold tracking-tight">AetherBase</span>
+            <span className="text-[17px] font-semibold tracking-tight">KotahBase</span>
             <span className="ml-2 text-[10px] uppercase tracking-[.18em] text-zinc-500 border border-white/10 rounded px-2 py-1">Developer platform</span>
           </div>
           <div className="relative max-w-xl py-16">
@@ -233,7 +233,7 @@ export default function Page() {
         </section>
         <main className="flex-1 flex items-center justify-center px-5 py-10 sm:px-10">
           <div className="w-full max-w-[390px]">
-            <div className="lg:hidden flex items-center gap-3 mb-10"><div className="w-9 h-9 rounded-xl bg-emerald-400 text-[#07100b] grid place-items-center font-black text-lg">a</div><span className="font-semibold text-lg">AetherBase</span></div>
+            <div className="lg:hidden flex items-center gap-3 mb-10"><div className="w-9 h-9 rounded-xl bg-emerald-400 text-[#07100b] grid place-items-center font-black text-lg">a</div><span className="font-semibold text-lg">KotahBase</span></div>
             <p className="text-xs uppercase tracking-[.18em] text-emerald-300 mb-3">{mode === "verify" ? "One last step" : "Developer access"}</p>
             <h2 className="text-[30px] font-semibold tracking-[-.04em]">{mode === "verify" ? "Verify your email" : mode === "signup" ? "Create your account" : "Welcome back"}</h2>
             <p className="text-sm text-zinc-500 mt-2 mb-8">{mode === "verify" ? "Enter the six-digit code associated with your account." : mode === "signup" ? "Get your project workspace ready in a few steps." : "Sign in to continue to your workspace."}</p>
@@ -252,7 +252,7 @@ export default function Page() {
                 <button type="button" onClick={()=>{setMode("signup");setOtp("");setAuthErr("");}} className="text-xs text-zinc-500 hover:text-white">Back to account details</button>
               </>}
               {authErr && <div role="alert" className="rounded-lg border border-red-400/20 bg-red-400/[0.07] px-3.5 py-3 text-sm leading-5 text-red-300">{authErr}</div>}
-              <button type="submit" disabled={authBusy} className="w-full h-11 rounded-lg bg-emerald-400 hover:bg-emerald-300 text-[#07100b] font-semibold text-sm transition disabled:opacity-50 disabled:cursor-wait">{authBusy?"Please wait…":mode==="login"?"Sign in to AetherBase":mode==="signup"?"Create account":"Verify email"}</button>
+              <button type="submit" disabled={authBusy} className="w-full h-11 rounded-lg bg-emerald-400 hover:bg-emerald-300 text-[#07100b] font-semibold text-sm transition disabled:opacity-50 disabled:cursor-wait">{authBusy?"Please wait…":mode==="login"?"Sign in to KotahBase":mode==="signup"?"Create account":"Verify email"}</button>
             </form>
             <div className="mt-7 flex items-center gap-3 text-[11px] text-zinc-600"><span className={`w-1.5 h-1.5 rounded-full ${health?.status==="healthy"?"bg-emerald-400":"bg-amber-400"}`}/>{health?.status==="healthy"?"API is reachable":"API connection not confirmed"}<span className="ml-auto">Secure account access</span></div>
             <p className="mt-8 text-[11px] leading-5 text-zinc-600">By continuing, you agree to use the platform responsibly. Keep your project secret keys private.</p>
@@ -267,7 +267,7 @@ export default function Page() {
       <div className="min-h-screen bg-[#080b09] text-white">
         <header className="border-b border-white/[0.08] px-5 sm:px-8 py-4 flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-emerald-400 text-[#07100b] grid place-items-center font-black">a</div>
-          <div><div className="font-semibold tracking-tight">AetherBase</div><div className="text-xs text-zinc-500">Your backend workspace</div></div>
+          <div><div className="font-semibold tracking-tight">KotahBase</div><div className="text-xs text-zinc-500">Your backend workspace</div></div>
           <div className="ml-auto flex items-center gap-3"><span className="hidden sm:block text-xs text-zinc-500">{user?.email}</span><button onClick={clearSession} className="text-xs text-zinc-400 hover:text-white">Sign out</button></div>
         </header>
         <main className="max-w-6xl mx-auto px-5 sm:px-8 py-10 sm:py-14">
@@ -298,17 +298,17 @@ export default function Page() {
       <div className="min-h-screen bg-[#080b09] text-white relative overflow-hidden flex flex-col">
         <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[700px] h-[500px] rounded-full bg-emerald-400/[0.06] blur-[140px] pointer-events-none" />
         <header className="relative border-b border-white/[0.08] px-5 sm:px-8 py-4 flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-emerald-400 text-[#07100b] grid place-items-center font-black">a</div><span className="font-semibold tracking-tight">AetherBase</span>
+          <div className="w-9 h-9 rounded-xl bg-emerald-400 text-[#07100b] grid place-items-center font-black">a</div><span className="font-semibold tracking-tight">KotahBase</span>
           {projects.length > 0 && <button onClick={() => setView("projects")} className="ml-auto text-xs text-zinc-400 hover:text-white">← All projects</button>}
           <button onClick={clearSession} className={projects.length > 0 ? "text-xs text-zinc-500 hover:text-white" : "ml-auto text-xs text-zinc-500 hover:text-white"}>Sign out</button>
         </header>
         <main className="relative flex-1 grid place-items-center px-5 py-12">
           <div className="w-full max-w-2xl">
-            <div className="text-center mb-8"><div className="mx-auto w-14 h-14 rounded-2xl border border-emerald-300/20 bg-emerald-300/[0.08] text-emerald-200 grid place-items-center text-2xl">✳</div><p className="mt-6 text-xs uppercase tracking-[.22em] text-emerald-300">{projects.length ? "New workspace" : "Let's get you started"}</p><h1 className="mt-3 text-3xl sm:text-4xl font-semibold tracking-[-.045em]">{projects.length ? "Create another project" : "Create your first project"}</h1><p className="mt-3 text-sm leading-6 text-zinc-400 max-w-lg mx-auto">Give your app a home. AetherBase will create a project reference and connection keys you can use to connect your website, mobile app, or game.</p></div>
+            <div className="text-center mb-8"><div className="mx-auto w-14 h-14 rounded-2xl border border-emerald-300/20 bg-emerald-300/[0.08] text-emerald-200 grid place-items-center text-2xl">✳</div><p className="mt-6 text-xs uppercase tracking-[.22em] text-emerald-300">{projects.length ? "New workspace" : "Let's get you started"}</p><h1 className="mt-3 text-3xl sm:text-4xl font-semibold tracking-[-.045em]">{projects.length ? "Create another project" : "Create your first project"}</h1><p className="mt-3 text-sm leading-6 text-zinc-400 max-w-lg mx-auto">Give your app a home. KotahBase will create a project reference and connection keys you can use to connect your website, mobile app, or game.</p></div>
             <div className="rounded-2xl border border-white/[0.1] bg-[#0d110f]/90 shadow-2xl shadow-black/30 p-5 sm:p-7">
               <label className="block text-xs font-medium text-zinc-300 mb-2">Project name</label><input value={pName} onChange={e => setPName(e.target.value)} placeholder="e.g. my-storefront" autoComplete="off" className="w-full h-12 rounded-xl border border-white/[0.1] bg-black/30 px-4 text-sm text-white placeholder:text-zinc-600 outline-none focus:border-emerald-300/60 focus:ring-4 focus:ring-emerald-300/[0.06] transition" />
               <label className="block text-xs font-medium text-zinc-300 mt-5 mb-2">Project password</label><input type="password" value={pPass} onChange={e => setPPass(e.target.value)} placeholder="Create a project password" autoComplete="new-password" className="w-full h-12 rounded-xl border border-white/[0.1] bg-black/30 px-4 text-sm text-white placeholder:text-zinc-600 outline-none focus:border-emerald-300/60 focus:ring-4 focus:ring-emerald-300/[0.06] transition" />
-              <p className="mt-3 text-[11px] leading-5 text-zinc-500">Use a strong password and keep your secret service key private. Project credentials are different from your AetherBase account password.</p>
+              <p className="mt-3 text-[11px] leading-5 text-zinc-500">Use a strong password and keep your secret service key private. Project credentials are different from your KotahBase account password.</p>
               {pMsg && <p role="alert" className="mt-4 rounded-lg border border-rose-300/20 bg-rose-300/[0.06] px-3 py-2.5 text-sm text-rose-200">{pMsg}</p>}
               <button disabled={pBusy} onClick={createProject} className="mt-5 w-full h-12 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-[#07100b] font-semibold text-sm transition disabled:opacity-50">{pBusy ? "Creating your project…" : "Create project →"}</button>
             </div>
