@@ -513,6 +513,8 @@ projectClientRoutes.get("/:ref/auth/v1/settings", async (c) => {
     email: project.enable_email !== false,
     google: !!(project.enable_google !== false && project.google_client_id),
     github: !!(project.enable_github !== false && project.github_client_id),
+    discord: !!(project.enable_discord === true && project.discord_client_id),
+    microsoft: !!(project.enable_microsoft === true && project.microsoft_client_id),
     site_url: project.site_url || null,
     authorize: {
       google: `${projectUrl(project.ref)}/auth/v1/authorize/google`,
