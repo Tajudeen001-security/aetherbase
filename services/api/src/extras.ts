@@ -16,6 +16,19 @@ async function getUser(authHeader: string | undefined) {
 
 export const extraRoutes = new Hono();
 
+function isSafeWebhookTarget(raw: string) {
+  try {
+    const u = new URL(raw);
+    const host = u.hostname.toLowerCase().replace(/^\\[|\\]$/g, "");
+    if (u.protocol !== "https:" || !host || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal") || host === "metadata.google.internal") return false;
+    if (/^(127\\.|10\\.|192\\.168\\.|169\\.254\\.)/.test(host)) return false;
+    const m = host.match(/^172\\.(\\d+)\\./);
+    if (m && Number(m[1]) >= 16 && Number(m[1]) <= 31) return false;
+    if (host === "::1" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80:")) return false;
+    return true;
+  } catch { return false; }
+}
+
 // ---------- Table data browser (view rows without writing SQL) ----------
 extraRoutes.get("/data/:table", async (c) => {
   try {
@@ -91,7 +104,10 @@ extraRoutes.post("/webhooks", async (c) => {
     const user = await getUser(c.req.header("Authorization"));
     if (!user) return c.json({ error: "Not authenticated" }, 401);
     const { url, events, project_id } = await c.req.json();
-    if (!url || !Array.isArray(events)) return c.json({ error: "url and events[] required" }, 400);
+    if (!url || !Array.isArray(events) || !project_id) return c.json({ error: "url, events[] and project_id required" }, 400);
+    if (!isSafeWebhookTarget(String(url))) return c.json({ error: "Webhook URL must be public HTTPS; local/private network targets are blocked" }, 400);
+    const owned = await query("SELECT id FROM projects WHERE id = $1 AND owner_id = $2", [project_id, user.id]);
+    if (!owned.rows.length) return c.json({ error: "Project not found" }, 404);
     const id = uuidv4();
     const secret = `whsec_${uuidv4().replace(/-/g, "").slice(0, 24)}`;
     await query(
@@ -124,7 +140,9 @@ extraRoutes.delete("/webhooks/:id", async (c) => {
 // Fire webhook helper (can be called internally)
 export async function fireWebhooks(event: string, payload: any) {
   try {
-    const res = await query("SELECT url, secret FROM webhooks WHERE active = true AND events::text LIKE $1", [`%${event}%`]);
+    const projectId = String((payload && payload.project_id) || "");
+    if (!projectId) return;
+    const res = await query("SELECT url, secret FROM webhooks WHERE active = true AND project_id = $2 AND events::text LIKE $1", [`%${event}%`, projectId]);
     for (const wh of res.rows) {
       fetch(wh.url, {
         method: "POST",
