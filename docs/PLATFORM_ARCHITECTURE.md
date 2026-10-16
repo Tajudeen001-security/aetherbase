@@ -66,7 +66,7 @@ Request counters and request logs are now persisted in PostgreSQL per project, i
 - Project picker, project creation, project refs, public/secret key display, and project API URL.
 - PostgreSQL project schemas and SQL editor scoped to a selected project.
 - REST-style CRUD endpoints, currently restricted to the server-only service-role key until RLS policies exist.
-- Authentication providers: email/password, Google OAuth, GitHub OAuth, and Discord OAuth configuration per project.
+- Authentication providers: email/password, Google OAuth, GitHub OAuth, Discord OAuth, and Microsoft/Azure OAuth configuration per project.
 - Object storage configuration through deployment environment variables, per-project object prefixes, upload/list/download-signed-URL/delete controls (25 MB dashboard upload cap).
 - Persistent request metrics and request logs.
 - Starter schema packs for social and game data; embeddings/search endpoints scoped to authenticated projects.
