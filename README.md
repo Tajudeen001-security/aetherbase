@@ -14,7 +14,7 @@
 
 ```bash
 git clone https://github.com/Tajudeen001-security/aetherbase.git
-cd kotahbase
+cd aetherbase
 
 # Start Postgres + MinIO
 cd infra && docker compose up -d
