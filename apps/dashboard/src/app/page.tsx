@@ -29,6 +29,8 @@ export default function Page() {
   const [sqlOut, setSqlOut] = useState<any>(null);
   const [sqlBusy, setSqlBusy] = useState(false);
   const [tables, setTables] = useState<string[]>([]);
+  const [newTableName, setNewTableName] = useState("");
+  const [tableBusy, setTableBusy] = useState(false);
   const [health, setHealth] = useState<any>(null);
   const [usage, setUsage] = useState<any>(null);
   const [requestLogs, setRequestLogs] = useState<any[]>([]);
@@ -232,6 +234,19 @@ export default function Page() {
     } catch (error: any) { setStorageMsg(error.message || "Upload failed"); }
     finally { setStorageBusy(false); }
   }
+  async function createTable() {
+    if (!project?.id) return;
+    const name = newTableName.trim().toLowerCase();
+    if (!/^[a-z][a-z0-9_]{0,62}$/.test(name)) { setSqlOut({ error: "Use a table name starting with a letter and containing only letters, numbers, and underscores (max 63 characters)." }); return; }
+    setTableBusy(true);
+    const { res, data } = await api("/sql", { method: "POST", body: JSON.stringify({ project_id: project.id, query: `CREATE TABLE ${name} (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())` }) });
+    setTableBusy(false);
+    if (!res.ok || !data.success) { setSqlOut({ error: data.error || "Could not create table" }); return; }
+    setNewTableName(""); setSqlOut({ message: `Created table ${name}`, rows: [] });
+    const refresh = await api(`/tables?project_id=${encodeURIComponent(project.id)}`);
+    if (refresh.res.ok) setTables(refresh.data);
+  }
+
   async function runSql() {
     if (!project?.id) return;
     setSqlBusy(true);
@@ -499,6 +514,10 @@ export default function Page() {
               <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-5"><div><h1 className="text-lg font-medium">Database tables</h1><p className="mt-1 text-sm text-zinc-500">Tables are created inside this project’s isolated schema.</p></div>
                 <div className="flex flex-wrap gap-2"><button onClick={async()=>{const {res,data}=await api("/schemas/packs/social",{method:"POST",body:JSON.stringify({project_id:project.id})}); if(res.ok){setStorageMsg(""); const t=await api(`/tables?project_id=${encodeURIComponent(project.id)}`); if(t.res.ok)setTables(t.data); setSqlOut({message:"Social schema pack installed",rows:[]});} else setSqlOut({error:data.error||"Could not install pack"});}} className="rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-200">Install social pack</button><button onClick={async()=>{const {res,data}=await api("/schemas/packs/game",{method:"POST",body:JSON.stringify({project_id:project.id})}); if(res.ok){const t=await api(`/tables?project_id=${encodeURIComponent(project.id)}`); if(t.res.ok)setTables(t.data); setSqlOut({message:"Game schema pack installed",rows:[]});} else setSqlOut({error:data.error||"Could not install pack"});}} className="rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-200">Install game pack</button><button onClick={()=>api(`/tables?project_id=${encodeURIComponent(project.id)}`).then(({res,data})=>{if(res.ok)setTables(data);})} className="rounded-lg bg-emerald-400 px-3 py-2 text-xs font-medium text-black">Refresh</button></div>
               </div>
+              <form onSubmit={e=>{e.preventDefault();void createTable();}} className="mb-5 flex flex-col sm:flex-row gap-2 max-w-xl">
+                <input value={newTableName} onChange={e=>setNewTableName(e.target.value)} placeholder="new_table_name" className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2.5 text-sm font-mono outline-none focus:border-emerald-400/50" />
+                <button disabled={tableBusy} className="rounded-lg bg-emerald-400 px-4 py-2.5 text-xs font-semibold text-black disabled:opacity-50">{tableBusy?"Creating…":"Create table"}</button>
+              </form>
               {sqlOut?.error && <p className="mb-3 text-sm text-rose-300">{sqlOut.error}</p>}{sqlOut?.message && <p className="mb-3 text-sm text-emerald-300">{sqlOut.message}</p>}
               <div className="flex flex-wrap gap-2">{tables.map(t => <span key={t} className="px-3 py-1.5 border border-zinc-800 rounded-md text-xs font-mono">{t}</span>)}</div>
               {tables.length===0 && <p className="mt-5 text-sm text-zinc-500">No tables yet. Create one in SQL or install a starter pack.</p>}
