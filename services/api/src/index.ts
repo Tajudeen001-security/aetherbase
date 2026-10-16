@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { v4 as uuidv4 } from "uuid";
+import { randomInt } from "crypto";
 import { query, queryProject } from "./db/client";
 import { hasS3, uploadFile, listFiles, getFileUrl, deleteFile } from "./storage";
 import { sendOTPEmail } from "./email";
@@ -33,7 +34,7 @@ const PLATFORM_GOOGLE_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 const PLATFORM_GITHUB_ID = process.env.GITHUB_CLIENT_ID || "";
 const PLATFORM_GITHUB_SECRET = process.env.GITHUB_CLIENT_SECRET || "";
 
-function generateOTP() { return Math.floor(100000 + Math.random() * 900000).toString(); }
+function generateOTP() { return randomInt(100000, 1000000).toString(); }
 function createToken(payload: object, expiresIn = "7d") { return jwt.sign(payload, JWT_SECRET, { expiresIn } as any); }
 async function getUserFromToken(authHeader: string | undefined) {
   if (!authHeader?.startsWith("Bearer ")) return null;
@@ -52,40 +53,54 @@ app.get("/health", async (c) => {
 
 app.post("/auth/v1/signup", async (c) => {
   try {
-    const { email, password } = await c.req.json();
-    if (!email || !password) return c.json({ error: "Email and password required" }, 400);
-    if (password.length < 8) return c.json({ error: "Password must be at least 8 characters" }, 400);
-    if ((await query("SELECT id FROM users WHERE email = $1", [email.toLowerCase()])).rows.length) return c.json({ error: "Email already registered" }, 400);
+    const body = await c.req.json();
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    const password = typeof body.password === "string" ? body.password : "";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return c.json({ error: "Enter a valid email address" }, 400);
+    if (password.length < 8 || password.length > 128) return c.json({ error: "Password must be between 8 and 128 characters" }, 400);
+    if ((await query("SELECT id FROM users WHERE email = $1", [email])).rows.length) return c.json({ error: "Email already registered" }, 400);
     const id = uuidv4();
-    await query("INSERT INTO users (id, email, password, email_confirmed, provider) VALUES ($1,$2,$3,false,'email')", [id, email.toLowerCase(), await bcrypt.hash(password, 10)]);
+    await query("INSERT INTO users (id, email, password, email_confirmed, provider) VALUES ($1,$2,$3,false,'email')", [id, email, await bcrypt.hash(password, 10)]);
     const code = generateOTP();
-    await query(`INSERT INTO otp_codes (email, code, expires_at, type) VALUES ($1,$2,NOW()+INTERVAL '10 minutes','signup') ON CONFLICT (email) DO UPDATE SET code=$2, expires_at=NOW()+INTERVAL '10 minutes', type='signup'`, [email.toLowerCase(), code]);
+    await query("INSERT INTO otp_codes (email, code, expires_at, type) VALUES ($1,$2,NOW()+INTERVAL '10 minutes','signup') ON CONFLICT (email) DO UPDATE SET code=$2, expires_at=NOW()+INTERVAL '10 minutes', type='signup'", [email, code]);
     const sent = await sendOTPEmail(email, code, "signup");
-    const response: any = { message: sent ? "Account created. Check email for code." : "Account created." };
-    if (!sent) response.dev_code = code;
-    return c.json(response);
-  } catch (err: any) { return c.json({ error: err.message }, 500); }
+    if (!sent && process.env.NODE_ENV === "production") {
+      await query("DELETE FROM otp_codes WHERE email = $1", [email]);
+      await query("DELETE FROM users WHERE id = $1", [id]);
+      return c.json({ error: "Email verification delivery is temporarily unavailable. Please try again later." }, 503);
+    }
+    const response: any = { message: sent ? "Account created. Check email for code." : "Development mode: email delivery is not configured." };
+    if (!sent && process.env.NODE_ENV !== "production") response.dev_code = code;
+    return c.json(response, 201);
+  } catch (err: any) { return c.json({ error: "Signup failed" }, 500); }
 });
 
 app.post("/auth/v1/verify", async (c) => {
   try {
-    const { email, code } = await c.req.json();
-    const otpRes = await query("SELECT code, expires_at FROM otp_codes WHERE email = $1", [email.toLowerCase()]);
+    const body = await c.req.json();
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    const code = typeof body.code === "string" ? body.code.trim() : "";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !/^\d{6}$/.test(code)) return c.json({ error: "Valid email and six-digit code required" }, 400);
+    const otpRes = await query("SELECT code, expires_at FROM otp_codes WHERE email = $1", [email]);
     if (!otpRes.rows.length) return c.json({ error: "No code found" }, 400);
     const record = otpRes.rows[0];
     if (new Date() > new Date(record.expires_at)) return c.json({ error: "Code expired" }, 400);
     if (record.code !== code) return c.json({ error: "Invalid code" }, 401);
-    await query("DELETE FROM otp_codes WHERE email = $1", [email.toLowerCase()]);
-    await query("UPDATE users SET email_confirmed = true WHERE email = $1", [email.toLowerCase()]);
-    const user = (await query("SELECT id, email, created_at, provider FROM users WHERE email = $1", [email.toLowerCase()])).rows[0];
+    await query("DELETE FROM otp_codes WHERE email = $1", [email]);
+    await query("UPDATE users SET email_confirmed = true WHERE email = $1", [email]);
+    const user = (await query("SELECT id, email, created_at, provider FROM users WHERE email = $1", [email])).rows[0];
+    if (!user) return c.json({ error: "Account not found" }, 404);
     return c.json({ access_token: createToken({ sub: user.id, email: user.email }), token_type: "bearer", expires_in: 604800, user });
   } catch { return c.json({ error: "Verification failed" }, 500); }
 });
 
 app.post("/auth/v1/login", async (c) => {
   try {
-    const { email, password } = await c.req.json();
-    const res = await query("SELECT * FROM users WHERE email = $1", [email.toLowerCase()]);
+    const body = await c.req.json();
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    const password = typeof body.password === "string" ? body.password : "";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !password) return c.json({ error: "Valid email and password required" }, 400);
+    const res = await query("SELECT * FROM users WHERE email = $1", [email]);
     if (!res.rows.length) return c.json({ error: "Invalid email or password" }, 401);
     const user = res.rows[0];
     if (!user.password) return c.json({ error: "Use social login" }, 400);
