@@ -14,6 +14,7 @@ import { schemaRoutes } from "./schemas";
 import { extraRoutes, ensureExtraTables } from "./extras";
 import { projectClientRoutes, makeKeys, projectUrl } from "./project-client";
 import { mountAuthSettings, ensureAuthColumns } from "./auth-settings";
+import { getProjectUsage } from "./usage";
 
 dotenv.config();
 const app = new Hono();
@@ -173,6 +174,14 @@ app.get("/projects", async (c) => {
   if (!user) return c.json({ error: "Not authenticated" }, 401);
   const res = await query("SELECT id, name, api_key, ref, anon_key, service_role_key, created_at FROM projects WHERE owner_id = $1 ORDER BY created_at DESC", [user.id]);
   return c.json(res.rows.map((r: any) => ({ ...r, url: r.ref ? projectUrl(r.ref) : null })));
+});
+
+app.get("/projects/:id/metrics", async (c) => {
+  const user = await getUserFromToken(c.req.header("Authorization"));
+  if (!user) return c.json({ error: "Not authenticated" }, 401);
+  const project = await query("SELECT id FROM projects WHERE id = $1 AND owner_id = $2", [c.req.param("id"), user.id]);
+  if (!project.rows.length) return c.json({ error: "Not found" }, 404);
+  return c.json(getProjectUsage(c.req.param("id")));
 });
 
 mountAuthSettings(app, getUserFromToken);
