@@ -1,6 +1,6 @@
-# AetherBase Platform Architecture
+# KotahBase Platform Architecture
 
-AetherBase aims to provide a Supabase-style backend workspace for applications, websites, and games, with infrastructure choices that work for Nigerian developers and global users.
+KotahBase aims to provide a Supabase-style backend workspace for applications, websites, and games, with infrastructure choices that work for Nigerian developers and global users.
 
 ## Product experience
 
@@ -68,4 +68,4 @@ The initial request meter is process-local beta telemetry and resets when the AP
 6. **Developer experience:** typed SDKs, copy-paste quickstarts, API reference, local development CLI, import/migration tools.
 7. **Scale and trust:** rate limits, abuse prevention, alerts, status page, restore drills, security review, load tests, documented service limits.
 
-AetherBase should compete on reliability, clear developer experience, transparent usage, and a safe project isolation model—not merely on matching a long feature list.
+KotahBase should compete on reliability, clear developer experience, transparent usage, and a safe project isolation model—not merely on matching a long feature list.
