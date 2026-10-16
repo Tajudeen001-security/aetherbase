@@ -31,6 +31,7 @@ export default function Page() {
   const [tables, setTables] = useState<string[]>([]);
   const [health, setHealth] = useState<any>(null);
   const [usage, setUsage] = useState<any>(null);
+  const [requestLogs, setRequestLogs] = useState<any[]>([]);
   const [authCfg, setAuthCfg] = useState<any>(null);
   const [authUsers, setAuthUsers] = useState<any[]>([]);
   const [authSaveMsg, setAuthSaveMsg] = useState("");
@@ -110,9 +111,10 @@ export default function Page() {
   }, [token]);
 
   useEffect(() => {
-    if (!token || view !== "app") return;
-    if (tab === "tables" || tab === "sql") api("/tables").then(({ res, data }) => { if (res.ok) setTables(data); });
+    if (!token || view !== "app" || !project?.id) return;
+    if (tab === "tables" || tab === "sql") api(`/tables?project_id=${encodeURIComponent(project.id)}`).then(({ res, data }) => { if (res.ok) setTables(data); });
     if (tab === "authentication" && project?.id) loadAuth(project.id);
+    if (tab === "logs" && project?.id) api(`/projects/${project.id}/logs?limit=100`).then(({ res, data }) => { if (res.ok) setRequestLogs(data); });
   }, [tab, token, view, project?.id]);
 
   useEffect(() => {
@@ -200,8 +202,9 @@ export default function Page() {
     setProjects([...projects, data]); setProject(data); setPName(""); setPPass(""); setView("app"); setTab("overview");
   }
   async function runSql() {
+    if (!project?.id) return;
     setSqlBusy(true);
-    const { data } = await api("/sql", { method: "POST", body: JSON.stringify({ query: sql }) });
+    const { data } = await api("/sql", { method: "POST", body: JSON.stringify({ query: sql, project_id: project.id }) });
     setSqlOut(data); setSqlBusy(false);
   }
   function copy(text: string, id: string) {
@@ -325,6 +328,7 @@ export default function Page() {
     { id: "authentication", label: "Authentication" },
     { id: "tables", label: "Tables" },
     { id: "sql", label: "SQL" },
+    { id: "logs", label: "Logs" },
     { id: "settings", label: "Settings" }
   ];
 
@@ -358,7 +362,7 @@ export default function Page() {
                 <div className="text-xs text-zinc-500 border border-white/[0.09] rounded-lg px-3 py-2"><span className={health?.status === "healthy" ? "text-emerald-300" : "text-amber-300"}>● </span>{health?.status === "healthy" ? "Platform API online" : "API status not confirmed"}</div>
               </div>
               <section className="grid sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
-                <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-5"><div className="text-xs text-zinc-500">API requests</div><div className="mt-3 text-3xl font-semibold tracking-tight">{usage ? Number(usage.requests).toLocaleString() : "—"}</div><div className="mt-2 text-[11px] text-zinc-600">Since API restart</div></div>
+                <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-5"><div className="text-xs text-zinc-500">API requests</div><div className="mt-3 text-3xl font-semibold tracking-tight">{usage ? Number(usage.requests).toLocaleString() : "—"}</div><div className="mt-2 text-[11px] text-zinc-600">Persistent meter</div></div>
                 <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-5"><div className="text-xs text-zinc-500">Successful requests</div><div className="mt-3 text-3xl font-semibold tracking-tight text-emerald-300">{usage ? Number(usage.successful).toLocaleString() : "—"}</div><div className="mt-2 text-[11px] text-zinc-600">HTTP 2xx–3xx</div></div>
                 <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-5"><div className="text-xs text-zinc-500">Failed requests</div><div className="mt-3 text-3xl font-semibold tracking-tight text-rose-300">{usage ? Number(usage.failed).toLocaleString() : "—"}</div><div className="mt-2 text-[11px] text-zinc-600">HTTP 4xx–5xx</div></div>
                 <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-5"><div className="text-xs text-zinc-500">Response egress</div><div className="mt-3 text-3xl font-semibold tracking-tight">{usage ? Number(usage.egressMB).toLocaleString() : "—"}<span className="text-sm font-normal text-zinc-500 ml-1">MB</span></div><div className="mt-2 text-[11px] text-zinc-600">Measured response payloads</div></div>
@@ -369,7 +373,7 @@ export default function Page() {
                   <div className="text-xs text-zinc-500 mb-2">Project API URL</div><div className="flex items-start gap-3"><code className="min-w-0 flex-1 break-all text-sm text-zinc-200">{project?.url || "URL will appear when project reference is available"}</code><button onClick={() => project?.url && copy(project.url, "overview-url")} className="shrink-0 text-xs text-emerald-300">{copied === "overview-url" ? "Copied" : "Copy"}</button></div>
                   <div className="mt-5 pt-5 border-t border-white/[0.07] grid sm:grid-cols-2 gap-4"><div><div className="text-xs text-zinc-500 mb-1">Database</div><div className="text-sm">{health?.database || "Checking connection…"}</div></div><div><div className="text-xs text-zinc-500 mb-1">Object storage</div><div className="text-sm">{health?.storage || "Checking connection…"}</div></div></div>
                 </section>
-                <section className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5 sm:p-6"><h2 className="font-medium mb-4">Usage meter</h2><p className="text-sm leading-6 text-zinc-400">Request counts and response egress are measured for this project’s API routes. This beta meter is held in API memory and resets when the service restarts; it is not yet a billing-grade quota counter.</p><div className="mt-5 pt-4 border-t border-white/[0.07] text-xs text-zinc-500">Last project request: {usage?.lastRequestAt ? new Date(usage.lastRequestAt).toLocaleString() : "No requests recorded yet"}</div></section>
+                <section className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5 sm:p-6"><h2 className="font-medium mb-4">Usage meter</h2><p className="text-sm leading-6 text-zinc-400">Request counts and response egress are stored in KotahBase Postgres. This is telemetry, not yet a billing-grade quota counter; egress measures API response payloads, not all network traffic.</p><div className="mt-5 pt-4 border-t border-white/[0.07] text-xs text-zinc-500">Last project request: {usage?.lastRequestAt ? new Date(usage.lastRequestAt).toLocaleString() : "No requests recorded yet"}</div></section>
               </div>
             </div>
           )}
@@ -452,6 +456,21 @@ export default function Page() {
               <button onClick={runSql} disabled={sqlBusy} className="px-4 py-2 bg-emerald-500 text-black text-sm font-medium rounded-md">{sqlBusy ? "…" : "Run"}</button>
               {sqlOut?.error && <p className="mt-3 text-red-400 text-sm">{sqlOut.error}</p>}
               {sqlOut?.rows && <p className="mt-3 text-xs text-zinc-500">{sqlOut.rowCount ?? sqlOut.rows.length} rows</p>}
+            </div>
+          )}
+          {tab === "logs" && (
+            <div className="max-w-6xl">
+              <div className="flex items-end justify-between gap-4 mb-5">
+                <div><h1 className="text-lg font-medium">Request logs</h1><p className="text-sm text-zinc-500 mt-1">Latest 100 project API requests, with response size and latency.</p></div>
+                <button onClick={() => api(`/projects/${project.id}/logs?limit=100`).then(({ res, data }) => { if (res.ok) setRequestLogs(data); })} className="text-xs text-emerald-300 border border-zinc-800 rounded-lg px-3 py-2">Refresh</button>
+              </div>
+              <div className="overflow-x-auto rounded-xl border border-zinc-800">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-zinc-900 text-zinc-400"><tr>{["Time","Method","Path","Status","Response","Latency"].map(x=><th key={x} className="px-3 py-3 font-medium whitespace-nowrap">{x}</th>)}</tr></thead>
+                  <tbody>{requestLogs.map((log:any)=><tr key={log.id} className="border-t border-zinc-800/80"><td className="px-3 py-3 whitespace-nowrap text-zinc-500">{new Date(log.created_at).toLocaleString()}</td><td className="px-3 py-3 font-mono">{log.method}</td><td className="px-3 py-3 font-mono max-w-[360px] truncate">{log.path}</td><td className={`px-3 py-3 font-mono ${log.status_code >= 400 ? "text-rose-300" : "text-emerald-300"}`}>{log.status_code}</td><td className="px-3 py-3 whitespace-nowrap">{Number(log.response_bytes).toLocaleString()} B</td><td className="px-3 py-3 whitespace-nowrap">{Number(log.duration_ms)} ms</td></tr>)}</tbody>
+                </table>
+                {requestLogs.length === 0 && <p className="p-6 text-sm text-zinc-500">No request logs recorded yet. Make a request using this project's API key and refresh.</p>}
+              </div>
             </div>
           )}
           {tab === "settings" && (
