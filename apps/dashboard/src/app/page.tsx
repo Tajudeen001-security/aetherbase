@@ -453,6 +453,7 @@ export default function Page() {
                       </div>
                     </div>
                   )}
+                </div>
                 <div className="border-t border-zinc-800 pt-3 space-y-2">
                   <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.enable_discord} onChange={e => setForm({ ...form, enable_discord: e.target.checked })} /> Discord</label>
                   <input value={form.discord_client_id} onChange={e => setForm({ ...form, discord_client_id: e.target.value })} placeholder="Discord Application Client ID" className="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-sm text-white outline-none" />
