@@ -34,21 +34,16 @@ API → http://localhost:4000
 
 ---
 
-## Deploy to Render (you said you have it)
+## Deploy to Render
 
 1. Go to https://dashboard.render.com
-2. Click **New** → **Blueprint**
-3. Connect the GitHub repo `Tajudeen001-security/aetherbase`
-4. Render will read the `render.yaml` file automatically
-5. Add your S3/R2 keys later (or use MinIO temporarily)
+2. Choose **New → Blueprint**.
+3. Connect `Tajudeen001-security/aetherbase`.
+4. Render reads the repository's `render.yaml`.
+5. Configure production secrets and database/storage resources in the Render dashboard; never commit real credentials.
 
-I already prepared the `render.yaml` for you.
+## JagX Connect migration
 
-Just tell me when you create the Render service and I will help you finish the environment variables.
+Use the dedicated [JagX Connect migration runbook](docs/JAGX_CONNECT_MIGRATION.md) before moving the website or Flutter app from Supabase. It covers source inventory, schema and identity mapping, Tigris media migration, authorization checks, reconciliation, staged cutover, and rollback.
 
-
-## Architecture and roadmap
-
-See [Platform Architecture](docs/PLATFORM_ARCHITECTURE.md) for the project lifecycle, domain/DNS plan, usage metrics, security priorities, and the isolation work required before production use.
-
-**Production readiness:** KotahBase now provisions a dedicated PostgreSQL schema for each project, scopes the project REST/SQL paths to that schema, and stores request metrics/logs in PostgreSQL. This is an important MVP boundary, not a substitute for database-role isolation, row-level policies, adversarial tenant-isolation tests, backups/restore drills, and a security review. Rotate the previously exposed storage credentials at the provider immediately; source-code fallbacks have been removed.
+**Important:** KotahBase is an MVP, not yet a production-verified drop-in Supabase replacement. It provisions per-project PostgreSQL schemas and scopes project API operations, but production use still requires database-role isolation, row-level policies, cross-tenant security tests, verified backups/restores, and a security review. Keep the original Supabase project and data intact until migration acceptance checks pass.
